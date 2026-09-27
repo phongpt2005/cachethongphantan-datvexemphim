@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<title>SƠ ĐỒ 7: CƠ CHẾ NGẮT MẠCH (CIRCUIT BREAKER) & RETRY BACKOFF CHỐNG SẬP DÂY CHUYỀN</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #ffffff;
+    color: #0f172a;
+    font-family: Arial, Helvetica, sans-serif;
+    padding: 16px 20px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  .header {
+    width: 100%;
+    max-width: 1520px;
+    border-bottom: 2px solid #1e293b;
+    padding-bottom: 6px;
+    margin-bottom: 10px;
+  }
+  .header h1 {
+    font-size: 19px;
+    font-weight: 700;
+    color: #0f172a;
+    letter-spacing: -0.2px;
+    margin-bottom: 2px;
+  }
+  .header p {
+    font-size: 12.5px;
+    color: #475569;
+  }
+  .canvas {
+    background: #ffffff;
+    border: 1px solid #cbd5e1;
+    padding: 10px;
+    width: 100%;
+    max-width: 1520px;
+  }
+  svg {
+    width: 100%;
+    height: auto;
+    display: block;
+  }
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>SƠ ĐỒ 7: CƠ CHẾ NGẮT MẠCH (CIRCUIT BREAKER) & RETRY BACKOFF CHỐNG SẬP DÂY CHUYỀN</h1>
+  <p>Máy trạng thái hữu hạn (CLOSED -> 5 lỗi liên tiếp -> OPEN ngắt mạch 30s -> HALF-OPEN thăm dò hồi phục) và cơ chế thử lại có độ trễ tăng dần</p>
+</div>
+<div class="canvas">
+
+<svg viewBox="0 0 1480 820" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="m7-arr" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#1e293b" />
+    </marker>
+    <marker id="m7-green" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#166534" />
+    </marker>
+    <marker id="m7-red" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#991b1b" />
+    </marker>
+  </defs>
+
+  <!-- Title Header -->
+  <rect x="250" y="10" width="980" height="50" fill="#ffffff" stroke="#1e293b" stroke-width="1.5" />
+  <text x="740" y="32" fill="#0f172a" font-size="13" font-weight="bold" text-anchor="middle">CƠ CHẾ NGẮT MẠCH (CIRCUIT BREAKER) &amp; RETRY WITH EXPONENTIAL BACKOFF</text>
+  <text x="740" y="48" fill="#475569" font-size="11" text-anchor="middle">Bảo vệ API Gateway không bị sập dây chuyền (Cascade Failure) khi dịch vụ downstream gặp sự cố hoặc quá tải</text>
+
+  <!-- Main Container -->
+  <rect x="20" y="75" width="1440" height="725" fill="#ffffff" stroke="#1e293b" stroke-width="1.8" />
+  <rect x="20" y="75" width="1440" height="28" fill="#1e293b" />
+  <text x="35" y="94" fill="#ffffff" font-size="12" font-weight="bold">MÁY TRẠNG THÁI HỮU HẠN CỦA CIRCUIT BREAKER (FINITE STATE MACHINE — 3 TRẠNG THÁI CHUẨN)</text>
+
+  <!-- CLOSED -->
+  <rect x="40" y="130" width="410" height="230" fill="#ffffff" stroke="#166534" stroke-width="1.8" />
+  <rect x="40" y="130" width="410" height="26" fill="#166534" />
+  <text x="245" y="148" fill="#ffffff" font-size="11.5" font-weight="bold" text-anchor="middle">1. TRẠNG THÁI: CLOSED (Đóng Mạch - Bình Thường)</text>
+
+  <text x="60" y="180" fill="#0f172a" font-size="11" font-weight="bold">• Hành vi xử lý request:</text>
+  <text x="75" y="200" fill="#475569" font-size="10.5">Mọi request từ Client đều được cho phép đi qua bình thường.</text>
+  <text x="75" y="218" fill="#475569" font-size="10.5">Chuyển tiếp tới gRPC Inventory hoặc Booking service.</text>
+
+  <text x="60" y="248" fill="#166534" font-size="11" font-weight="bold">• Tích hợp Retry with Exponential Backoff:</text>
+  <text x="75" y="268" fill="#475569" font-size="10.5">Nếu gặp lỗi chập chờn mạng: Tự thử lại tối đa 3 lần.</text>
+  <text x="75" y="286" fill="#475569" font-size="10.5">Thời gian chờ tăng dần: 500ms -&gt; 1000ms -&gt; 2000ms + Jitter.</text>
+
+  <text x="60" y="318" fill="#991b1b" font-size="11" font-weight="bold">[ĐIỀU KIỆN CHUYỂN MẠCH]:</text>
+  <text x="75" y="338" fill="#991b1b" font-size="10.5">5 lần lỗi liên tiếp (failureThreshold = 5) -&gt; CHUYỂN SANG OPEN</text>
+
+  <!-- Line to OPEN -->
+  <line x1="450" y1="245" x2="550" y2="245" stroke="#991b1b" stroke-width="2" marker-end="url(#m7-red)" />
+  <rect x="465" y="225" width="75" height="18" fill="#ffffff" stroke="#991b1b" />
+  <text x="502" y="238" fill="#991b1b" font-size="9" font-weight="bold" text-anchor="middle">5 Lỗi liên tiếp</text>
+
+  <!-- OPEN -->
+  <rect x="560" y="130" width="410" height="230" fill="#ffffff" stroke="#991b1b" stroke-width="1.8" />
+  <rect x="560" y="130" width="410" height="26" fill="#991b1b" />
+  <text x="765" y="148" fill="#ffffff" font-size="11.5" font-weight="bold" text-anchor="middle">2. TRẠNG THÁI: OPEN (Ngắt Mạch - Chặn Hoàn Toàn)</text>
+
+  <text x="580" y="180" fill="#991b1b" font-size="11" font-weight="bold">• Hành vi xử lý request:</text>
+  <text x="595" y="200" fill="#991b1b" font-size="10.5">KHÔNG GỌI DỊCH VỤ PHÍA DƯỚI! Chặn đứng ngay tại Gateway.</text>
+  <text x="595" y="218" fill="#475569" font-size="10.5">Tránh cho downstream service đang quá tải bị nhận thêm việc.</text>
+
+  <text x="580" y="248" fill="#0f172a" font-size="11" font-weight="bold">• Phản hồi Fallback tức thì (&lt; 1ms):</text>
+  <text x="595" y="268" fill="#0f172a" font-size="10.5">Trả về thông điệp êm dịu (Graceful Degradation):</text>
+  <text x="595" y="286" fill="#475569" font-size="10">"Hệ thống đang bận hoặc bảo trì, vui lòng thử lại sau 30 giây."</text>
+
+  <text x="580" y="318" fill="#0f172a" font-size="11" font-weight="bold">[ĐỒNG HỒ ĐẾM NGƯỢC]:</text>
+  <text x="595" y="338" fill="#475569" font-size="10.5">recoveryTimeout = 30000ms (30 giây) -&gt; CHUYỂN SANG HALF-OPEN</text>
+
+  <!-- Line to HALF-OPEN -->
+  <line x1="970" y1="245" x2="1060" y2="245" stroke="#1e293b" stroke-width="1.8" marker-end="url(#m7-arr)" />
+  <rect x="985" y="225" width="60" height="18" fill="#ffffff" stroke="#1e293b" />
+  <text x="1015" y="238" fill="#0f172a" font-size="9" font-weight="bold" text-anchor="middle">Hết 30s</text>
+
+  <!-- HALF-OPEN -->
+  <rect x="1070" y="130" width="370" height="230" fill="#ffffff" stroke="#334155" stroke-width="1.8" />
+  <rect x="1070" y="130" width="370" height="26" fill="#334155" />
+  <text x="1255" y="148" fill="#ffffff" font-size="11.5" font-weight="bold" text-anchor="middle">3. TRẠNG THÁI: HALF-OPEN (Bán Mở - Thăm Dò)</text>
+
+  <text x="1090" y="180" fill="#0f172a" font-size="11" font-weight="bold">• Hành vi thăm dò sức khoẻ:</text>
+  <text x="1105" y="200" fill="#475569" font-size="10.5">Cho phép đúng 1 request thử nghiệm đi qua xuống hạ tầng.</text>
+  <text x="1105" y="218" fill="#475569" font-size="10.5">Các request khác đến cùng lúc vẫn nhận Fallback.</text>
+
+  <text x="1090" y="248" fill="#166534" font-size="11" font-weight="bold">• Nếu thành công 2 lần (successThreshold=2):</text>
+  <text x="1105" y="268" fill="#166534" font-size="10.5">Hạ tầng đã hồi phục! -&gt; Chuyển mạch QUAY VỀ CLOSED.</text>
+
+  <text x="1090" y="298" fill="#991b1b" font-size="11" font-weight="bold">• Nếu vẫn bị lỗi:</text>
+  <text x="1105" y="318" fill="#991b1b" font-size="10.5">Dịch vụ vẫn chưa sẵn sàng -&gt; QUAY LẠI OPEN thêm 30s nữa.</text>
+
+  <!-- Loops -->
+  <path d="M 1255 360 L 1255 400 L 245 400 L 245 360" fill="none" stroke="#166534" stroke-width="2" stroke-dasharray="5,3" marker-end="url(#m7-green)" />
+  <rect x="670" y="390" width="160" height="20" fill="#ffffff" stroke="#166534" />
+  <text x="750" y="404" fill="#166534" font-size="10" font-weight="bold" text-anchor="middle">Thành công -&gt; Về CLOSED</text>
+
+  <path d="M 1150 360 L 1150 380 L 850 380 L 850 360" fill="none" stroke="#991b1b" stroke-width="1.8" stroke-dasharray="4,3" marker-end="url(#m7-red)" />
+  <rect x="940" y="370" width="120" height="18" fill="#ffffff" stroke="#991b1b" />
+  <text x="1000" y="383" fill="#991b1b" font-size="9" font-weight="bold" text-anchor="middle">Lỗi -&gt; Về lại OPEN</text>
+
+  <!-- Bottom Explanations -->
+  <rect x="40" y="430" width="1400" height="350" fill="#ffffff" stroke="#cbd5e1" />
+  <text x="60" y="455" fill="#0f172a" font-size="12" font-weight="bold">TẠI SAO CIRCUIT BREAKER LÀ ĐIỂM ĂN ĐIỂM XUẤT SẮC TRONG HỆ THỐNG PHÂN TÁN?</text>
+
+  <text x="60" y="485" fill="#0f172a" font-size="11.5" font-weight="bold">1. Bài toán Sập Dây Chuyền (Cascading Failure):</text>
+  <text x="75" y="505" fill="#475569" font-size="11">• Giả sử inventory-service bị treo: Nếu không có Circuit Breaker, mỗi request từ Client gửi vào Gateway sẽ bị treo chờ timeout (60 giây).</text>
+  <text x="75" y="525" fill="#475569" font-size="11">• Hàng trăm request bị nghẽn làm cạn kiệt Connection Pool và RAM của API Gateway -&gt; Cuối cùng API Gateway sập theo!</text>
+  <text x="75" y="545" fill="#166534" font-size="11" font-weight="bold">• Có Circuit Breaker: Khi phát hiện 5 lỗi liên tiếp, Gateway lập tức NGẮT MẠCH. Trả lỗi ngay trong 0.1ms, giữ cho Gateway sống sót để phục vụ các endpoint khác.</text>
+
+  <text x="60" y="580" fill="#0f172a" font-size="11.5" font-weight="bold">2. Trải nghiệm người dùng văn minh (Fail Fast &amp; Graceful Degradation):</text>
+  <text x="75" y="600" fill="#475569" font-size="11">• Thay vì bắt người dùng ngồi nhìn vòng tròn xoay 60 giây rồi mới báo lỗi Gateway Timeout (504).</text>
+  <text x="75" y="620" fill="#475569" font-size="11">• Hệ thống phản hồi ngay tức khắc với thông điệp rõ ràng, bảo vệ độ tin cậy của nền tảng.</text>
+
+  <text x="60" y="655" fill="#0f172a" font-size="11.5" font-weight="bold">3. Tích hợp trong mã nguồn dự án:</text>
+  <text x="75" y="675" fill="#475569" font-size="11">• Triển khai thuần TypeScript trong shared/src/circuit-breaker.ts không cần phụ thuộc thư viện ngoài.</text>
+  <text x="75" y="695" fill="#475569" font-size="11">• Được áp dụng trực tiếp vào GatewayService để bọc cả 2 kênh gọi gRPC: this.inventoryCircuit và this.bookingCircuit.</text>
+</svg>
+
+</div>
+</body>
+</html>
