@@ -1,0 +1,270 @@
+version: "3.8"
+
+services:
+  # === POSTGRESQL INVENTORY (MASTER) ===
+  pg-inv-master:
+    build:
+      context: ../../db-cluster
+      dockerfile: Dockerfile
+    container_name: pg-inv-master
+    environment:
+      POSTGRES_DB: inventory_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    command: >
+      postgres
+        -c wal_level=replica
+        -c max_wal_senders=10
+        -c max_replication_slots=10
+        -c hot_standby=on
+        -c wal_keep_size=256MB
+        -c listen_addresses='*'
+        -c shared_buffers=256MB
+        -c max_connections=200
+    volumes:
+      - inv_master_data:/var/lib/postgresql/data
+      - ../../db-cluster/init-master.sh:/docker-entrypoint-initdb.d/01-init.sh
+      - ../../db-cluster/inventory/repmgr-node1.conf:/etc/repmgr.conf
+    ports:
+      - "10.0.0.1:5501:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d inventory_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - node1-net
+
+  # === POSTGRESQL BOOKING (MASTER) ===
+  pg-book-master:
+    build:
+      context: ../../db-cluster
+      dockerfile: Dockerfile
+    container_name: pg-book-master
+    environment:
+      POSTGRES_DB: booking_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    command: >
+      postgres
+        -c wal_level=replica
+        -c max_wal_senders=10
+        -c max_replication_slots=10
+        -c hot_standby=on
+        -c wal_keep_size=256MB
+        -c listen_addresses='*'
+        -c shared_buffers=256MB
+        -c max_connections=200
+    volumes:
+      - book_master_data:/var/lib/postgresql/data
+      - ../../db-cluster/init-master.sh:/docker-entrypoint-initdb.d/01-init.sh
+      - ../../db-cluster/booking/repmgr-node1.conf:/etc/repmgr.conf
+    ports:
+      - "10.0.0.1:5502:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d booking_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - node1-net
+
+  # === RABBITMQ (CLUSTER NODE 1) ===
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: rabbitmq-node1
+    hostname: rabbit-node1
+    environment:
+      RABBITMQ_ERLANG_COOKIE: "DISTRIBUTED_SECRET_COOKIE_2026"
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    ports:
+      - "10.0.0.1:5672:5672"
+      - "10.0.0.1:15672:15672"
+      - "10.0.0.1:4369:4369"
+      - "10.0.0.1:25672:25672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - node1-net
+
+  # === REDIS MASTER ===
+  redis:
+    image: redis:7-alpine
+    container_name: redis-node1
+    command: >
+      redis-server
+        --bind 0.0.0.0
+        --protected-mode no
+        --maxmemory 256mb
+        --maxmemory-policy allkeys-lru
+        --appendonly yes
+    ports:
+      - "10.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+    networks:
+      - node1-net
+
+  # === INVENTORY SERVICE (NODE 1) ===
+  inventory-service:
+    build:
+      context: ../../inventory-service
+      dockerfile: Dockerfile
+    container_name: inventory-node1
+    environment:
+      DB_MASTER_HOST: pg-inv-master
+      DB_MASTER_PORT: 5432
+      DB_REPLICA_HOST: pg-inv-master
+      DB_REPLICA_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_NAME: inventory_db
+      LOCK_STRATEGY: ${LOCK_STRATEGY:-pessimistic}
+      PROTO_PATH: /app/shared/protos/inventory.proto
+      REDIS_MASTER_HOST: 10.0.0.1
+      REDIS_LOCAL_HOST: redis
+      NODE_ID: node1
+    volumes:
+      - ../../shared/protos:/app/shared/protos:ro
+    ports:
+      - "10.0.0.1:50052:50052"
+      - "10.0.0.1:3002:3002"
+    depends_on:
+      pg-inv-master: { condition: service_healthy }
+    networks:
+      - node1-net
+
+  # === BOOKING SERVICE (INSTANCE 1) ===
+  booking-service-1:
+    build:
+      context: ../../booking-service
+      dockerfile: Dockerfile
+    container_name: booking-node1-1
+    environment:
+      DB_HOST: pg-book-master
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_NAME: booking_db
+      INVENTORY_GRPC_URL: inventory-service:50052
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+      INVENTORY_PROTO_PATH: /app/shared/protos/inventory.proto
+      BOOKING_PROTO_PATH: /app/shared/protos/booking.proto
+      NODE_ID: node1
+    volumes:
+      - ../../shared/protos:/app/shared/protos:ro
+    expose:
+      - "50051"
+      - "3001"
+    depends_on:
+      pg-book-master: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+    networks:
+      - node1-net
+
+  # === BOOKING SERVICE (INSTANCE 2) ===
+  booking-service-2:
+    build:
+      context: ../../booking-service
+      dockerfile: Dockerfile
+    container_name: booking-node1-2
+    environment:
+      DB_HOST: pg-book-master
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_NAME: booking_db
+      INVENTORY_GRPC_URL: inventory-service:50052
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+      INVENTORY_PROTO_PATH: /app/shared/protos/inventory.proto
+      BOOKING_PROTO_PATH: /app/shared/protos/booking.proto
+      NODE_ID: node1
+    volumes:
+      - ../../shared/protos:/app/shared/protos:ro
+    expose:
+      - "50051"
+      - "3001"
+    depends_on:
+      pg-book-master: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+    networks:
+      - node1-net
+
+  # === BOOKING LOAD BALANCER (NGINX gRPC LB) ===
+  booking-lb:
+    image: nginx:alpine
+    container_name: booking-lb-node1
+    volumes:
+      - ./nginx-booking.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "10.0.0.1:50051:50051"
+    depends_on:
+      - booking-service-1
+      - booking-service-2
+    networks:
+      - node1-net
+
+  # === NOTIFICATION SERVICE ===
+  notification-service:
+    build:
+      context: ../../notification-service
+      dockerfile: Dockerfile
+    container_name: notification-node1
+    environment:
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+      NODE_ID: node1
+    depends_on:
+      rabbitmq: { condition: service_healthy }
+    networks:
+      - node1-net
+
+  # === API GATEWAY (NODE 1) ===
+  api-gateway:
+    build:
+      context: ../../api-gateway
+      dockerfile: Dockerfile
+    container_name: gateway-node1
+    environment:
+      PORT: 3000
+      INVENTORY_GRPC_URL: inventory-service:50052
+      BOOKING_GRPC_URL: booking-lb:50051
+      INVENTORY_PROTO_PATH: /app/shared/protos/inventory.proto
+      BOOKING_PROTO_PATH: /app/shared/protos/booking.proto
+      NODE_ID: node1
+    volumes:
+      - ../../shared/protos:/app/shared/protos:ro
+    ports:
+      - "10.0.0.1:3000:3000"
+    depends_on:
+      - booking-lb
+      - inventory-service
+    networks:
+      - node1-net
+
+  # === FRONTEND LOAD BALANCER ===
+  frontend-lb:
+    image: nginx:alpine
+    container_name: frontend-lb
+    volumes:
+      - ./nginx-frontend.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "80:80"
+    depends_on:
+      - api-gateway
+    networks:
+      - node1-net
+
+volumes:
+  inv_master_data:
+  book_master_data:
+
+networks:
+  node1-net:
+    driver: bridge

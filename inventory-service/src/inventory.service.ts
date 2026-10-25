@@ -1,8 +1,9 @@
 import { Injectable, OnModuleInit, Logger } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
+import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { RpcException } from '@nestjs/microservices';
 import { status } from '@grpc/grpc-js';
+import Redis from 'ioredis';
 import * as os from 'os';
 import { Showtime } from './entities/showtime.entity';
 import { Seat } from './entities/seat.entity';
@@ -11,13 +12,23 @@ import { Seat } from './entities/seat.entity';
 export class InventoryService implements OnModuleInit {
   private readonly logger = new Logger('InventoryService');
   private readonly hostname = os.hostname();
+  private readonly nodeId = process.env.NODE_ID || 'node1';
+
+  private redisWrite: Redis | null = null;
+  private redisRead: Redis | null = null;
 
   constructor(
     @InjectRepository(Showtime)
     private readonly showtimeRepo: Repository<Showtime>,
     @InjectRepository(Seat)
     private readonly seatRepo: Repository<Seat>,
-    private readonly dataSource: DataSource,
+    @InjectDataSource()
+    private readonly masterDataSource: DataSource,
+
+    @InjectRepository(Showtime, 'replica')
+    private readonly showtimeReadRepo: Repository<Showtime>,
+    @InjectRepository(Seat, 'replica')
+    private readonly seatReadRepo: Repository<Seat>,
   ) {}
 
   private getLockStrategy(): 'pessimistic' | 'optimistic' {
@@ -26,23 +37,40 @@ export class InventoryService implements OnModuleInit {
   }
 
   async onModuleInit() {
-    this.logInfo(`Initializing Inventory Service. Current LOCK_STRATEGY = ${this.getLockStrategy().toUpperCase()}`);
+    const masterRedisHost = process.env.REDIS_MASTER_HOST || '10.0.0.1';
+    const localRedisHost = process.env.REDIS_LOCAL_HOST || 'localhost';
+
+    try {
+      this.redisWrite = new Redis({
+        host: masterRedisHost,
+        port: 6379,
+        lazyConnect: true,
+        maxRetriesPerRequest: 1,
+        retryStrategy: (times) => Math.min(times * 100, 3000),
+      });
+      this.redisWrite.on('error', (err) => {
+        // Log quietly so optional Redis does not crash service
+      });
+      await this.redisWrite.connect().catch(() => {});
+    } catch (e) {}
+
+    try {
+      this.redisRead = new Redis({
+        host: localRedisHost,
+        port: 6379,
+        lazyConnect: true,
+        maxRetriesPerRequest: 1,
+        retryStrategy: (times) => Math.min(times * 100, 3000),
+      });
+      this.redisRead.on('error', (err) => {
+        // Log quietly
+      });
+      await this.redisRead.connect().catch(() => {});
+    } catch (e) {}
+
+    console.log(`[INVENTORY] [${this.nodeId}] Current LOCK_STRATEGY = ${this.getLockStrategy().toUpperCase()}`);
+    console.log(`[INVENTORY] [${this.nodeId}] Redis connected: Write->${masterRedisHost}:6379, Read->${localRedisHost}:6379`);
     await this.seedData();
-  }
-
-  private logInfo(message: string) {
-    const timestamp = new Date().toISOString();
-    console.log(`[INVENTORY-SERVICE] [HOST: ${this.hostname}] [TIME: ${timestamp}] ${message}`);
-  }
-
-  private logWarn(message: string) {
-    const timestamp = new Date().toISOString();
-    console.warn(`[INVENTORY-SERVICE] [HOST: ${this.hostname}] [TIME: ${timestamp}] ⚠️ ${message}`);
-  }
-
-  private logError(message: string) {
-    const timestamp = new Date().toISOString();
-    console.error(`[INVENTORY-SERVICE] [HOST: ${this.hostname}] [TIME: ${timestamp}] ❌ ${message}`);
   }
 
   async seedData() {
@@ -56,76 +84,77 @@ export class InventoryService implements OnModuleInit {
           showTime: '2026-10-01T19:30:00Z',
         });
         await this.showtimeRepo.save(showtime);
-        this.logInfo('Created seed showtime: Avengers: Secret Wars (Hall 1)');
+        console.log('[INVENTORY] Seed showtime created.');
       }
 
       const count = await this.seatRepo.count({ where: { showtimeId: '1' } });
       if (count === 0) {
         const seats: Seat[] = [];
         for (let i = 1; i <= 20; i++) {
-          const seatCode = `A${i}`;
-          // Deliberately make A1-A19 BOOKED, only A20 is AVAILABLE to demo race condition!
-          const seatStatus = i === 20 ? 'available' : 'booked';
           seats.push(
             this.seatRepo.create({
               id: `${i}`,
               showtimeId: '1',
-              seatCode,
-              status: seatStatus,
+              seatCode: `A${i}`,
+              status: i === 20 ? 'available' : 'booked',
               version: 1,
             }),
           );
         }
         await this.seatRepo.save(seats);
-        this.logInfo('Created 20 seed seats (A1-A19 BOOKED, A20 AVAILABLE for race condition demo)');
+        console.log('[INVENTORY] 20 seed seats created (A20 available).');
       }
     } catch (err) {
-      this.logError(`Error during seedData: ${err.message}`);
+      console.error(`Seed error: ${err.message}`);
     }
   }
 
   async resetData() {
-    this.logInfo('Resetting inventory data to initial demo state...');
     for (let i = 1; i <= 20; i++) {
-      const seatStatus = i === 20 ? 'available' : 'booked';
       await this.seatRepo.update(
         { id: `${i}` },
-        { status: seatStatus, version: 1 },
+        { status: i === 20 ? 'available' : 'booked', version: 1 },
       );
     }
-    this.logInfo('Inventory data successfully reset (Seat A20 is available)');
-    return { success: true, message: 'Inventory reset successfully. Seat A20 is now available.' };
+    if (this.redisWrite) {
+      try {
+        await this.redisWrite.del('seats:1');
+      } catch (e) {}
+    }
+    return { success: true, message: 'Reset data completed.' };
   }
 
   async getShowtime(showtimeId: string) {
-    const showtime = await this.showtimeRepo.findOne({ where: { id: showtimeId } });
+    const showtime = await this.showtimeReadRepo.findOne({ where: { id: showtimeId } });
     if (!showtime) {
-      throw new RpcException({
-        code: status.NOT_FOUND,
-        message: `Showtime with ID ${showtimeId} not found`,
-      });
+      throw new RpcException({ code: status.NOT_FOUND, message: `Showtime ${showtimeId} not found` });
     }
     return showtime;
   }
 
   async listSeats(showtimeId: string) {
-    const seats = await this.seatRepo.find({
-      where: { showtimeId },
-      order: { id: 'ASC' },
-    });
+    const cacheKey = `seats:${showtimeId}`;
+    if (this.redisRead) {
+      try {
+        const cached = await this.redisRead.get(cacheKey);
+        if (cached) return { seats: JSON.parse(cached) };
+      } catch (e) {}
+    }
+
+    const seats = await this.seatReadRepo.find({ where: { showtimeId }, order: { id: 'ASC' } });
+    if (this.redisWrite) {
+      try {
+        await this.redisWrite.setex(cacheKey, 15, JSON.stringify(seats));
+      } catch (e) {}
+    }
     return { seats };
   }
 
   async reserveSeat(seatId: string, showtimeId: string, userName: string) {
     const strategy = this.getLockStrategy();
-    this.logInfo(`[LOCK=${strategy.toUpperCase()}] Reserve request for seatId=${seatId} by user="${userName}"`);
-
     const showtime = await this.showtimeRepo.findOne({ where: { id: showtimeId } });
     if (!showtime) {
-      throw new RpcException({
-        code: status.NOT_FOUND,
-        message: `Showtime ${showtimeId} not found`,
-      });
+      throw new RpcException({ code: status.NOT_FOUND, message: `Showtime ${showtimeId} not found` });
     }
 
     if (strategy === 'pessimistic') {
@@ -135,44 +164,35 @@ export class InventoryService implements OnModuleInit {
     }
   }
 
-  /**
-   * PESSIMISTIC LOCKING:
-   * Uses Postgres 'SELECT ... FOR UPDATE' in a database transaction.
-   * Other concurrent transactions trying to lock the same row will wait until this transaction completes.
-   */
+  // ✅ GIỮ NGUYÊN 100%: THUẬT TOÁN PESSIMISTIC LOCKING (SELECT FOR UPDATE)
   private async reserveSeatPessimistic(seatId: string, showtime: Showtime, userName: string) {
-    const queryRunner = this.dataSource.createQueryRunner();
+    const queryRunner = this.masterDataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
 
     try {
-      this.logInfo(`[PESSIMISTIC] Acquiring SELECT FOR UPDATE lock on seatId=${seatId}...`);
       const seat = await queryRunner.manager.findOne(Seat, {
         where: { id: seatId },
         lock: { mode: 'pessimistic_write' },
       });
 
-      if (!seat) {
-        throw new RpcException({
-          code: status.NOT_FOUND,
-          message: `Seat with ID ${seatId} not found`,
-        });
-      }
-
-      if (seat.status !== 'available') {
-        this.logWarn(`[PESSIMISTIC] Seat ${seat.seatCode} is ALREADY BOOKED! Rejecting user="${userName}"`);
+      if (!seat || seat.status !== 'available') {
         throw new RpcException({
           code: status.ALREADY_EXISTS,
-          message: `Seat ${seat.seatCode} is already booked`,
+          message: `Seat ${seat?.seatCode || seatId} is already booked`,
         });
       }
 
-      // Mark seat as booked
       seat.status = 'booked';
       await queryRunner.manager.save(seat);
       await queryRunner.commitTransaction();
 
-      this.logInfo(`[PESSIMISTIC] Seat ${seat.seatCode} successfully locked & reserved for user="${userName}"`);
+      // Xoá cache trên Redis Master -> tự đồng bộ sang Redis Replica của cả 2 node
+      if (this.redisWrite) {
+        try {
+          await this.redisWrite.del(`seats:${showtime.id}`);
+        } catch (e) {}
+      }
 
       return {
         success: true,
@@ -186,52 +206,27 @@ export class InventoryService implements OnModuleInit {
       };
     } catch (err) {
       await queryRunner.rollbackTransaction();
-      if (err instanceof RpcException) throw err;
-      this.logError(`[PESSIMISTIC] Transaction error: ${err.message}`);
-      throw new RpcException({
-        code: status.INTERNAL,
-        message: `Database transaction failed: ${err.message}`,
-      });
+      throw err;
     } finally {
       await queryRunner.release();
     }
   }
 
-  /**
-   * OPTIMISTIC LOCKING:
-   * Checks the version column before updating:
-   * UPDATE seats SET status='booked', version=version+1 WHERE id=:id AND version=:version AND status='available'
-   * If another transaction updated the row first, affected rows = 0 -> throws Concurrency Conflict.
-   */
+  // ✅ GIỮ NGUYÊN 100%: THUẬT TOÁN OPTIMISTIC LOCKING (VERSION COLUMN ATOMIC CHECK)
   private async reserveSeatOptimistic(seatId: string, showtime: Showtime, userName: string) {
-    this.logInfo(`[OPTIMISTIC] Reading seatId=${seatId} to get current version...`);
     const seat = await this.seatRepo.findOne({ where: { id: seatId } });
-
-    if (!seat) {
-      throw new RpcException({
-        code: status.NOT_FOUND,
-        message: `Seat with ID ${seatId} not found`,
-      });
-    }
-
-    if (seat.status !== 'available') {
-      this.logWarn(`[OPTIMISTIC] Seat ${seat.seatCode} is ALREADY BOOKED! Rejecting user="${userName}"`);
+    if (!seat || seat.status !== 'available') {
       throw new RpcException({
         code: status.ALREADY_EXISTS,
-        message: `Seat ${seat.seatCode} is already booked`,
+        message: `Seat ${seat?.seatCode || seatId} is already booked`,
       });
     }
 
     const currentVersion = seat.version;
-    this.logInfo(`[OPTIMISTIC] Attempting atomic UPDATE for seat ${seat.seatCode} with version=${currentVersion}...`);
-
     const updateResult = await this.seatRepo
       .createQueryBuilder()
       .update(Seat)
-      .set({
-        status: 'booked',
-        version: () => 'version + 1',
-      })
+      .set({ status: 'booked', version: () => 'version + 1' })
       .where('id = :id AND version = :version AND status = :status', {
         id: seatId,
         version: currentVersion,
@@ -240,14 +235,17 @@ export class InventoryService implements OnModuleInit {
       .execute();
 
     if (updateResult.affected === 0) {
-      this.logWarn(`[OPTIMISTIC] Conflict detected! Another request reserved seat ${seat.seatCode} first! Version changed from ${currentVersion}. Rejecting user="${userName}"`);
       throw new RpcException({
         code: status.ABORTED,
         message: `Optimistic Lock Conflict: Seat ${seat.seatCode} was updated by a concurrent transaction (version conflict)`,
       });
     }
 
-    this.logInfo(`[OPTIMISTIC] Seat ${seat.seatCode} reserved successfully (new version = ${currentVersion + 1}) for user="${userName}"`);
+    if (this.redisWrite) {
+      try {
+        await this.redisWrite.del(`seats:${showtime.id}`);
+      } catch (e) {}
+    }
 
     return {
       success: true,

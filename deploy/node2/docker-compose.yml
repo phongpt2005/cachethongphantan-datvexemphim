@@ -1,0 +1,250 @@
+version: "3.8"
+
+services:
+  # === POSTGRESQL INVENTORY (REPLICA) ===
+  pg-inv-replica:
+    build:
+      context: ../../db-cluster
+      dockerfile: Dockerfile
+    container_name: pg-inv-replica
+    environment:
+      PGUSER: postgres
+      PGPASSWORD: postgres
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        set -e
+        echo "=== Chờ Master Inventory tại 10.0.0.1:5501 ==="
+        until pg_isready -h 10.0.0.1 -p 5501 -U postgres; do
+          sleep 2
+        done
+
+        if [ ! -f /var/lib/postgresql/data/PG_VERSION ]; then
+          echo "=== Sao lưu cơ sở dữ liệu qua pg_basebackup ==="
+          PGPASSWORD=repl_secure_pass_2026 pg_basebackup \
+            -h 10.0.0.1 -p 5501 -U replicator \
+            -D /var/lib/postgresql/data -Fp -Xs -P -R
+
+          cat >> /var/lib/postgresql/data/postgresql.auto.conf <<EOF
+        primary_conninfo = 'host=10.0.0.1 port=5501 user=replicator password=repl_secure_pass_2026'
+        primary_slot_name = 'inv_replica_slot'
+        EOF
+          chown -R postgres:postgres /var/lib/postgresql/data
+        fi
+
+        echo "=== Khởi động PostgreSQL ở chế độ Standby/Replica ==="
+        exec docker-entrypoint.sh postgres -c hot_standby=on -c listen_addresses='*'
+    volumes:
+      - inv_replica_data:/var/lib/postgresql/data
+      - ../../db-cluster/inventory/repmgr-node2.conf:/etc/repmgr.conf
+    ports:
+      - "10.0.0.2:5501:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+    networks:
+      - node2-net
+
+  # === POSTGRESQL BOOKING (REPLICA) ===
+  pg-book-replica:
+    build:
+      context: ../../db-cluster
+      dockerfile: Dockerfile
+    container_name: pg-book-replica
+    environment:
+      PGUSER: postgres
+      PGPASSWORD: postgres
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        set -e
+        echo "=== Chờ Master Booking tại 10.0.0.1:5502 ==="
+        until pg_isready -h 10.0.0.1 -p 5502 -U postgres; do
+          sleep 2
+        done
+
+        if [ ! -f /var/lib/postgresql/data/PG_VERSION ]; then
+          echo "=== Sao lưu cơ sở dữ liệu qua pg_basebackup ==="
+          PGPASSWORD=repl_secure_pass_2026 pg_basebackup \
+            -h 10.0.0.1 -p 5502 -U replicator \
+            -D /var/lib/postgresql/data -Fp -Xs -P -R
+
+          cat >> /var/lib/postgresql/data/postgresql.auto.conf <<EOF
+        primary_conninfo = 'host=10.0.0.1 port=5502 user=replicator password=repl_secure_pass_2026'
+        primary_slot_name = 'book_replica_slot'
+        EOF
+          chown -R postgres:postgres /var/lib/postgresql/data
+        fi
+
+        echo "=== Khởi động PostgreSQL Booking ở chế độ Standby/Replica ==="
+        exec docker-entrypoint.sh postgres -c hot_standby=on -c listen_addresses='*'
+    volumes:
+      - book_replica_data:/var/lib/postgresql/data
+      - ../../db-cluster/booking/repmgr-node2.conf:/etc/repmgr.conf
+    ports:
+      - "10.0.0.2:5502:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+    networks:
+      - node2-net
+
+  # === RABBITMQ (CLUSTER NODE 2) ===
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: rabbitmq-node2
+    hostname: rabbit-node2
+    environment:
+      RABBITMQ_ERLANG_COOKIE: "DISTRIBUTED_SECRET_COOKIE_2026"
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    ports:
+      - "10.0.0.2:5672:5672"
+      - "10.0.0.2:15672:15672"
+      - "10.0.0.2:4369:4369"
+      - "10.0.0.2:25672:25672"
+    networks:
+      - node2-net
+
+  # === REDIS REPLICA (THEO DÕI MASTER TẠI 10.0.0.1) ===
+  redis:
+    image: redis:7-alpine
+    container_name: redis-node2
+    command: >
+      redis-server
+        --bind 0.0.0.0
+        --protected-mode no
+        --replicaof 10.0.0.1 6379
+        --replica-read-only yes
+        --maxmemory 256mb
+        --maxmemory-policy allkeys-lru
+    ports:
+      - "10.0.0.2:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+    networks:
+      - node2-net
+
+  # === INVENTORY SERVICE (NODE 2) ===
+  inventory-service:
+    build:
+      context: ../../inventory-service
+      dockerfile: Dockerfile
+    container_name: inventory-node2
+    environment:
+      DB_MASTER_HOST: 10.0.0.1
+      DB_MASTER_PORT: 5501
+      DB_REPLICA_HOST: pg-inv-replica
+      DB_REPLICA_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_NAME: inventory_db
+      LOCK_STRATEGY: ${LOCK_STRATEGY:-pessimistic}
+      PROTO_PATH: /app/shared/protos/inventory.proto
+      REDIS_MASTER_HOST: 10.0.0.1
+      REDIS_LOCAL_HOST: redis
+      NODE_ID: node2
+    volumes:
+      - ../../shared/protos:/app/shared/protos:ro
+    ports:
+      - "10.0.0.2:50052:50052"
+      - "10.0.0.2:3002:3002"
+    depends_on:
+      pg-inv-replica: { condition: service_healthy }
+    networks:
+      - node2-net
+
+  # === BOOKING SERVICE (NODE 2) ===
+  booking-service:
+    build:
+      context: ../../booking-service
+      dockerfile: Dockerfile
+    container_name: booking-node2
+    environment:
+      DB_HOST: 10.0.0.1
+      DB_PORT: 5502
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_NAME: booking_db
+      INVENTORY_GRPC_URL: inventory-service:50052
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+      INVENTORY_PROTO_PATH: /app/shared/protos/inventory.proto
+      BOOKING_PROTO_PATH: /app/shared/protos/booking.proto
+      NODE_ID: node2
+    volumes:
+      - ../../shared/protos:/app/shared/protos:ro
+    expose:
+      - "50051"
+      - "3001"
+    depends_on:
+      pg-book-replica: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+    networks:
+      - node2-net
+
+  # === BOOKING LOAD BALANCER (NGINX gRPC LB NODE 2) ===
+  booking-lb:
+    image: nginx:alpine
+    container_name: booking-lb-node2
+    volumes:
+      - ./nginx-booking.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "10.0.0.2:50051:50051"
+    depends_on:
+      - booking-service
+    networks:
+      - node2-net
+
+  # === NOTIFICATION SERVICE (NODE 2) ===
+  notification-service:
+    build:
+      context: ../../notification-service
+      dockerfile: Dockerfile
+    container_name: notification-node2
+    environment:
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+      NODE_ID: node2
+    depends_on:
+      rabbitmq: { condition: service_healthy }
+    networks:
+      - node2-net
+
+  # === API GATEWAY (NODE 2) ===
+  api-gateway:
+    build:
+      context: ../../api-gateway
+      dockerfile: Dockerfile
+    container_name: gateway-node2
+    environment:
+      PORT: 3000
+      INVENTORY_GRPC_URL: inventory-service:50052
+      BOOKING_GRPC_URL: booking-lb:50051
+      INVENTORY_PROTO_PATH: /app/shared/protos/inventory.proto
+      BOOKING_PROTO_PATH: /app/shared/protos/booking.proto
+      NODE_ID: node2
+    volumes:
+      - ../../shared/protos:/app/shared/protos:ro
+    ports:
+      - "10.0.0.2:3000:3000"
+    depends_on:
+      - booking-lb
+      - inventory-service
+    networks:
+      - node2-net
+
+volumes:
+  inv_replica_data:
+  book_replica_data:
+
+networks:
+  node2-net:
+    driver: bridge

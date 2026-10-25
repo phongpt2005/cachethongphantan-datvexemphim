@@ -23,8 +23,8 @@ if (!protoPath) {
   imports: [
     TypeOrmModule.forRoot({
       type: 'postgres',
-      host: process.env.DB_HOST || 'localhost',
-      port: parseInt(process.env.DB_PORT || '5432', 10),
+      host: process.env.DB_MASTER_HOST || process.env.DB_HOST || 'localhost',
+      port: parseInt(process.env.DB_MASTER_PORT || process.env.DB_PORT || '5432', 10),
       username: process.env.DB_USER || 'postgres',
       password: process.env.DB_PASSWORD || 'postgres',
       database: process.env.DB_NAME || 'booking_db',

@@ -6,6 +6,7 @@ import { CreateBookingDto } from './dtos/create-booking.dto';
 @Controller()
 export class GatewayController {
   private readonly hostname = os.hostname();
+  private readonly nodeId = process.env.NODE_ID || 'node1';
 
   constructor(private readonly gatewayService: GatewayService) {}
 
@@ -14,9 +15,18 @@ export class GatewayController {
     return {
       status: 'ok',
       service: 'api-gateway',
+      nodeId: this.nodeId,
       hostname: this.hostname,
       timestamp: new Date().toISOString(),
-      architecture: 'Distributed Microservices (gRPC + RabbitMQ + PostgreSQL)',
+      architecture: 'Distributed Microservices Multi-Node (gRPC + RabbitMQ Quorum + Redis Cache-Aside + PostgreSQL HA)',
+    };
+  }
+
+  @Get('health/deep')
+  getDeepHealth() {
+    return {
+      status: 'ok',
+      ...this.gatewayService.getCircuitStatus(),
     };
   }
 

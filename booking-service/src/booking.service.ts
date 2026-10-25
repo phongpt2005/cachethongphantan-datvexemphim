@@ -16,6 +16,7 @@ interface InventoryGrpcService {
 export class BookingService implements OnModuleInit {
   private readonly logger = new Logger('BookingService');
   private readonly hostname = os.hostname();
+  private readonly nodeId = process.env.NODE_ID || 'node1';
   private inventoryGrpc: InventoryGrpcService;
 
   constructor(
@@ -29,44 +30,24 @@ export class BookingService implements OnModuleInit {
 
   onModuleInit() {
     this.inventoryGrpc = this.clientGrpc.getService<InventoryGrpcService>('InventoryService');
-    this.logInfo(`Booking Service initialized on host ${this.hostname}. Connected to Inventory gRPC.`);
-  }
-
-  private logInfo(message: string) {
-    const timestamp = new Date().toISOString();
-    console.log(`[BOOKING-SERVICE] [HOST: ${this.hostname}] [TIME: ${timestamp}] ${message}`);
-  }
-
-  private logWarn(message: string) {
-    const timestamp = new Date().toISOString();
-    console.warn(`[BOOKING-SERVICE] [HOST: ${this.hostname}] [TIME: ${timestamp}] ⚠️ ${message}`);
-  }
-
-  private logError(message: string) {
-    const timestamp = new Date().toISOString();
-    console.error(`[BOOKING-SERVICE] [HOST: ${this.hostname}] [TIME: ${timestamp}] ❌ ${message}`);
+    console.log(`[BOOKING-SERVICE] [${this.nodeId}] Initialized on ${this.hostname}. Connected to Inventory gRPC & RabbitMQ.`);
   }
 
   async createBooking(showtimeId: string, seatId: string, userName: string) {
-    this.logInfo(`Received booking request: showtimeId=${showtimeId}, seatId=${seatId}, user="${userName}"`);
-
-    // Step 1: Call Inventory Service via gRPC to reserve seat
+    // 1. Gọi Inventory gRPC để giữ chỗ ghế
     let reserveRes: any;
     try {
-      this.logInfo(`Calling InventoryService.ReserveSeat via gRPC for seatId=${seatId}...`);
       reserveRes = await firstValueFrom(
         this.inventoryGrpc.reserveSeat({ seatId, showtimeId, userName }),
       );
-      this.logInfo(`Inventory gRPC returned success: seatCode=${reserveRes.seatCode}, movieName=${reserveRes.movieName}`);
     } catch (err) {
-      this.logWarn(`InventoryService rejected seat reservation: ${err.message || err.details}`);
       throw new RpcException({
-        code: err.code || 2, // UNKNOWN or pass through
+        code: err.code || 2,
         message: err.message || err.details || 'Failed to reserve seat in inventory',
       });
     }
 
-    // Step 2: Save Booking record into PostgreSQL booking_db
+    // 2. Lưu Booking vào Database Master
     const booking = this.bookingRepo.create({
       id: uuidv4(),
       seatId,
@@ -75,9 +56,8 @@ export class BookingService implements OnModuleInit {
       status: 'CONFIRMED',
     });
     await this.bookingRepo.save(booking);
-    this.logInfo(`Saved booking to booking_db: bookingId=${booking.id}`);
 
-    // Step 3: Publish event to RabbitMQ (Asynchronous Decoupling)
+    // 3. Bắn event sang RabbitMQ Quorum Queue (Asynchronous Decoupling)
     const eventPayload = {
       bookingId: booking.id,
       seatId,
@@ -92,13 +72,9 @@ export class BookingService implements OnModuleInit {
     };
 
     try {
-      this.logInfo(`Publishing "booking.confirmed" event to RabbitMQ for bookingId=${booking.id}...`);
-      // Emit event (fire and forget / async decouple)
       this.rabbitClient.emit('booking.confirmed', eventPayload);
-      this.logInfo(`Published "booking.confirmed" successfully to RabbitMQ`);
     } catch (err) {
-      this.logError(`Failed to publish message to RabbitMQ: ${err.message}`);
-      // Even if RabbitMQ is temporarily down, the booking is confirmed in DB
+      console.error(`RabbitMQ publish error: ${err.message}`);
     }
 
     return {
@@ -119,10 +95,7 @@ export class BookingService implements OnModuleInit {
   async getBooking(bookingId: string) {
     const booking = await this.bookingRepo.findOne({ where: { id: bookingId } });
     if (!booking) {
-      throw new RpcException({
-        code: 5, // NOT_FOUND
-        message: `Booking with ID ${bookingId} not found`,
-      });
+      throw new RpcException({ code: 5, message: `Booking ${bookingId} not found` });
     }
     return {
       id: booking.id,
@@ -136,9 +109,7 @@ export class BookingService implements OnModuleInit {
   }
 
   async resetData() {
-    this.logInfo('Resetting booking records in booking_db...');
     await this.bookingRepo.clear();
-    this.logInfo('All booking records deleted.');
     return { success: true, message: 'Booking data reset successfully' };
   }
 }
