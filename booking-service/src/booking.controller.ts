@@ -1,7 +1,9 @@
 import { Controller, Get } from '@nestjs/common';
 import { GrpcMethod } from '@nestjs/microservices';
+import { asUnavailable } from './common/db-unavailable';
 import * as os from 'os';
 import { BookingService } from './booking.service';
+import { getRuntimeInfo } from './common/runtime-info';
 
 @Controller()
 export class BookingController {
@@ -17,9 +19,15 @@ export class BookingController {
     };
   }
 
+  // Demo Chương 3: luồng nhân, namespace, cgroups của container này
+  @Get('lab/runtime')
+  getRuntime() {
+    return getRuntimeInfo('booking-service');
+  }
+
   @GrpcMethod('BookingService', 'CreateBooking')
   async createBooking(data: { showtimeId: string; seatId: string; userName: string }) {
-    return this.bookingService.createBooking(data.showtimeId, data.seatId, data.userName);
+    return this.bookingService.createBooking(data.showtimeId, data.seatId, data.userName).catch((e) => { throw asUnavailable(e); });
   }
 
   @GrpcMethod('BookingService', 'GetBooking')
@@ -29,6 +37,6 @@ export class BookingController {
 
   @GrpcMethod('BookingService', 'ResetData')
   async resetData() {
-    return this.bookingService.resetData();
+    return this.bookingService.resetData().catch((e) => { throw asUnavailable(e); });
   }
 }

@@ -1,0 +1,83 @@
+# ==============================================================================
+# NODE 3 — TRỌNG TÀI (WITNESS): không chứa dữ liệu nghiệp vụ, chỉ tham gia bỏ phiếu đa số 2/3
+#   • Witness repmgr cho cụm inventory_db và cụm booking_db
+#   • RabbitMQ #3: thành viên thứ 3 của nhóm Raft (quorum queue)
+#   • Frontend LB: điểm vào duy nhất cho client, vẫn sống khi máy 1 hoặc máy 2 chết
+#   Khởi động:  node deploy/cluster.mjs up 3      (sau khi máy 1 đã chạy)
+#
+#   Cổng mở ra mạng LAN:
+#     8090  Frontend LB (client)     5503  Witness inventory    5504  Witness booking
+#     15694 RabbitMQ UI
+# ==============================================================================
+name: node3
+
+x-witness: &witness
+  build: ../../db-cluster
+  image: movie-booking/pg-repmgr:15
+  restart: unless-stopped
+  cap_add: [NET_ADMIN]   # chỉ dùng khi tập dượt: mô phỏng đứt mạng
+  healthcheck:
+    test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres"]
+    interval: 3s
+    timeout: 3s
+    retries: 100
+
+services:
+  pg-inv-witness:
+    <<: *witness
+    container_name: pg-inv-witness
+    environment:
+      POSTGRES_PASSWORD: postgres
+      NODE_ROLE: witness
+      NODE_ID: 3
+      NODE_NAME: inv-witness
+      PRIORITY: 0
+      ADVERTISE_HOST: ${NODE3_IP}
+      ADVERTISE_PORT: 5503
+      PEERS: ${NODE1_IP}:5501,${NODE2_IP}:5511
+    ports: ["5503:5432"]
+    volumes: [pg_inv_witness:/var/lib/postgresql/data]
+
+  pg-book-witness:
+    <<: *witness
+    container_name: pg-book-witness
+    environment:
+      POSTGRES_PASSWORD: postgres
+      NODE_ROLE: witness
+      NODE_ID: 3
+      NODE_NAME: book-witness
+      PRIORITY: 0
+      ADVERTISE_HOST: ${NODE3_IP}
+      ADVERTISE_PORT: 5504
+      PEERS: ${NODE1_IP}:5502,${NODE2_IP}:5512
+    ports: ["5504:5432"]
+    volumes: [pg_book_witness:/var/lib/postgresql/data]
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: rabbitmq-node3
+    hostname: rabbit-node3
+    restart: unless-stopped
+    environment:
+      RABBITMQ_ERLANG_COOKIE: movie_booking_cluster_cookie_2026
+    volumes: [../rabbitmq/cluster.conf:/etc/rabbitmq/conf.d/20-cluster.conf:ro]
+    ports: ["15694:15672"]
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  frontend-lb:
+    image: nginx:alpine
+    container_name: frontend-lb
+    restart: unless-stopped
+    environment:
+      NODE1_IP: ${NODE1_IP}
+      NODE2_IP: ${NODE2_IP}
+    volumes: [./frontend.conf.template:/etc/nginx/templates/default.conf.template:ro]
+    ports: ["8090:80"]
+
+volumes:
+  pg_inv_witness:
+  pg_book_witness:

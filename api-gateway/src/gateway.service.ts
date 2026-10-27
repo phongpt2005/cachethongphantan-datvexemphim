@@ -1,6 +1,6 @@
 import { Injectable, OnModuleInit, Inject, HttpException, HttpStatus } from '@nestjs/common';
 import { ClientGrpc } from '@nestjs/microservices';
-import { firstValueFrom, Observable } from 'rxjs';
+import { firstValueFrom, Observable, timeout } from 'rxjs';
 import * as os from 'os';
 import { CircuitBreaker } from './common/circuit-breaker';
 import { retryWithBackoff } from './common/retry';
@@ -17,6 +17,10 @@ interface BookingGrpcService {
   resetData(data: any): Observable<any>;
 }
 
+// Hạn chót cho mỗi lời gọi gRPC: dịch vụ chết thì lỗi sau vài giây chứ không treo request mãi mãi
+const GRPC_DEADLINE_MS = Number(process.env.GRPC_DEADLINE_MS || 3000);
+const call = <T>(obs: Observable<T>): Promise<T> => firstValueFrom(obs.pipe(timeout(GRPC_DEADLINE_MS)));
+
 @Injectable()
 export class GatewayService implements OnModuleInit {
   private inventoryGrpc: InventoryGrpcService;
@@ -24,8 +28,10 @@ export class GatewayService implements OnModuleInit {
   private readonly hostname = os.hostname();
   private readonly nodeId = process.env.NODE_ID || 'node1';
 
-  private inventoryCircuit = new CircuitBreaker('inventory-grpc', 5, 30000);
-  private bookingCircuit = new CircuitBreaker('booking-grpc', 5, 30000);
+  private readonly circuitThreshold = Number(process.env.CIRCUIT_FAILURE_THRESHOLD || 5);
+  private readonly circuitResetMs = Number(process.env.CIRCUIT_RESET_MS || 30000);
+  private inventoryCircuit = new CircuitBreaker('inventory-grpc', this.circuitThreshold, this.circuitResetMs);
+  private bookingCircuit = new CircuitBreaker('booking-grpc', this.circuitThreshold, this.circuitResetMs);
 
   constructor(
     @Inject('INVENTORY_PACKAGE') private readonly inventoryClient: ClientGrpc,
@@ -41,7 +47,8 @@ export class GatewayService implements OnModuleInit {
   private mapGrpcError(err: any): HttpException {
     const timestamp = new Date().toISOString();
     const code = err.code;
-    const message = err.details || err.message || 'Internal RPC Error';
+    // Bỏ tiền tố "6 ALREADY_EXISTS: " mà gRPC gắn vào thông điệp khi lỗi đi qua nhiều service
+    const message = String(err.details || err.message || 'Internal RPC Error').replace(/^(\d+ [A-Z_]+: )+/, '');
 
     if (code === 6 || code === 10) {
       return new HttpException({ statusCode: HttpStatus.CONFLICT, error: 'Conflict', message, timestamp }, HttpStatus.CONFLICT);
@@ -51,6 +58,9 @@ export class GatewayService implements OnModuleInit {
     }
     if (code === 3) {
       return new HttpException({ statusCode: HttpStatus.BAD_REQUEST, error: 'Bad Request', message, timestamp }, HttpStatus.BAD_REQUEST);
+    }
+    if (err?.name === 'TimeoutError' || code === 4) {
+      return new HttpException({ statusCode: HttpStatus.GATEWAY_TIMEOUT, error: 'Gateway Timeout', message: `Dịch vụ không phản hồi trong ${GRPC_DEADLINE_MS} ms`, timestamp }, HttpStatus.GATEWAY_TIMEOUT);
     }
     if (code === 14) {
       return new HttpException({ statusCode: HttpStatus.SERVICE_UNAVAILABLE, error: 'Service Unavailable', message, timestamp }, HttpStatus.SERVICE_UNAVAILABLE);
@@ -63,8 +73,8 @@ export class GatewayService implements OnModuleInit {
       () => retryWithBackoff(async () => {
         try {
           const [showtime, seatsRes] = await Promise.all([
-            firstValueFrom(this.inventoryGrpc.getShowtime({ showtimeId })),
-            firstValueFrom(this.inventoryGrpc.listSeats({ showtimeId })),
+            call(this.inventoryGrpc.getShowtime({ showtimeId })),
+            call(this.inventoryGrpc.listSeats({ showtimeId })),
           ]);
           return {
             success: true,
@@ -81,7 +91,7 @@ export class GatewayService implements OnModuleInit {
       () => ({
         success: false,
         error: 'Circuit Breaker Open',
-        message: 'Dịch vụ rạp phim đang quá tải hoặc gặp sự cố, vui lòng thử lại sau 30 giây.',
+        message: `Dịch vụ rạp phim đang quá tải hoặc gặp sự cố, vui lòng thử lại sau ${Math.round(this.circuitResetMs / 1000)} giây.`,
         gatewayHost: this.hostname,
         nodeId: this.nodeId,
         timestamp: new Date().toISOString(),
@@ -90,21 +100,30 @@ export class GatewayService implements OnModuleInit {
   }
 
   async bookTicket(showtimeId: string, seatId: string, userName: string) {
+    console.log(`[API-GATEWAY] [HOST: ${this.hostname}] [TIME: ${new Date().toISOString()}] Forwarding booking user=${userName} seat=${seatId} -> booking-lb (gRPC)`);
     return this.bookingCircuit.execute(async () => {
       try {
-        const result = await firstValueFrom(
+        const result = await call(
           this.bookingGrpc.createBooking({ showtimeId, seatId, userName }),
         );
         return { ...result, gatewayHost: this.hostname, nodeId: this.nodeId };
       } catch (err) {
         throw this.mapGrpcError(err);
       }
+    }, () => {
+      // Mạch đang mở: từ chối ngay (fail-fast) thay vì để request treo chờ dịch vụ hỏng
+      throw new HttpException({
+        statusCode: HttpStatus.SERVICE_UNAVAILABLE,
+        error: 'Circuit Breaker Open',
+        message: `Hệ thống đặt vé đang gặp sự cố, vui lòng thử lại sau ${Math.round(this.circuitResetMs / 1000)} giây.`,
+        timestamp: new Date().toISOString(),
+      }, HttpStatus.SERVICE_UNAVAILABLE);
     });
   }
 
   async getBooking(bookingId: string) {
     try {
-      const result = await firstValueFrom(this.bookingGrpc.getBooking({ bookingId }));
+      const result = await call(this.bookingGrpc.getBooking({ bookingId }));
       return { ...result, gatewayHost: this.hostname, nodeId: this.nodeId };
     } catch (err) {
       throw this.mapGrpcError(err);
@@ -114,8 +133,8 @@ export class GatewayService implements OnModuleInit {
   async resetAllDemoData() {
     try {
       const [invReset, bookReset] = await Promise.all([
-        firstValueFrom(this.inventoryGrpc.resetData({})),
-        firstValueFrom(this.bookingGrpc.resetData({})),
+        call(this.inventoryGrpc.resetData({})),
+        call(this.bookingGrpc.resetData({})),
       ]);
       return {
         success: true,

@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Demo Console – Đặt vé phân tán</title>
+<style>
+  :root {
+    --red: #b3261e;
+    --red-dark: #8c1d18;
+    --red-soft: #fdeceb;
+    --bg: #fff8f7;
+    --card: #ffffff;
+    --ink: #1f1b1a;
+    --muted: #6b5f5d;
+    --line: #ecdcda;
+    --ok: #1b7f3b;
+    --ok-soft: #e3f4e8;
+    --warn: #a15c00;
+    --warn-soft: #fff1dc;
+    --blue: #1d4f91;
+    --blue-soft: #e5eefa;
+    --mono: "Cascadia Code", Consolas, "SFMono-Regular", monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 "Segoe UI", "Open Sans", system-ui, sans-serif; }
+  header { background: var(--red); color: #fff; padding: 14px 24px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  header h1 { margin: 0; font-size: 20px; font-weight: 700; letter-spacing: .2px; }
+  header .sub { opacity: .85; font-size: 13px; }
+  header .status { margin-left: auto; font-size: 13px; display: flex; gap: 8px; align-items: center; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: #ccc; display: inline-block; }
+  .dot.ok { background: #7ee2a0; } .dot.bad { background: #ffb4ab; }
+  nav { display: flex; gap: 4px; padding: 0 24px; background: var(--red-soft); border-bottom: 1px solid var(--line); overflow-x: auto; }
+  nav button { border: 0; background: transparent; padding: 12px 16px; font: inherit; font-weight: 600; color: var(--red-dark); cursor: pointer; border-bottom: 3px solid transparent; white-space: nowrap; }
+  nav button.active { border-bottom-color: var(--red); color: var(--red); }
+  main { padding: 20px 24px 40px; max-width: 1280px; margin: 0 auto; }
+  @media (max-width: 600px) { main, header, nav { padding-left: 16px; padding-right: 16px; } }
+  .tab { display: none; } .tab.active { display: block; }
+  .grid { display: grid; gap: 16px; }
+  .g2 { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  @media (max-width: 900px) { .g2 { grid-template-columns: 1fr; } }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; overflow-x: auto; }
+  .card h2 { margin: 0 0 4px; font-size: 16px; color: var(--red-dark); }
+  .card .hint { margin: 0 0 12px; color: var(--muted); font-size: 13px; }
+  .theory { border-left: 4px solid var(--red); background: var(--red-soft); padding: 10px 14px; border-radius: 6px; font-size: 13.5px; margin-bottom: 16px; }
+  .theory b { color: var(--red-dark); }
+  .btns { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; align-items: center; }
+  button.act { border: 1px solid var(--red); background: var(--red); color: #fff; padding: 8px 14px; border-radius: 7px; font: inherit; font-weight: 600; cursor: pointer; }
+  button.act.ghost { background: #fff; color: var(--red); }
+  button.act:disabled { opacity: .5; cursor: wait; }
+  .seats { display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)); gap: 6px; margin: 8px 0 4px; }
+  .seat { border-radius: 6px 6px 3px 3px; padding: 8px 0; text-align: center; font-weight: 700; font-size: 12px; border: 1px solid var(--line); }
+  .seat.booked { background: #eee6e5; color: #9a8f8d; }
+  .seat.available { background: var(--ok-soft); color: var(--ok); border-color: #9fd6b0; }
+  .seat.flash { outline: 3px solid var(--red); }
+  .screen { text-align: center; font-size: 11px; color: var(--muted); border-top: 3px solid var(--line); margin-top: 6px; padding-top: 2px; letter-spacing: 3px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .4px; }
+  td.mono, .mono { font-family: var(--mono); font-size: 12.5px; }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 700; }
+  .pill.ok { background: var(--ok-soft); color: var(--ok); }
+  .pill.bad { background: var(--red-soft); color: var(--red); }
+  .pill.warn { background: var(--warn-soft); color: var(--warn); }
+  .pill.info { background: var(--blue-soft); color: var(--blue); }
+  .summary { font-size: 14px; margin-top: 10px; padding: 10px 12px; border-radius: 8px; background: #faf6f5; }
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-top: 10px; }
+  .kpi { background: #faf6f5; border-radius: 8px; padding: 8px 12px; }
+  .kpi .v { font-size: 20px; font-weight: 700; color: var(--red-dark); font-variant-numeric: tabular-nums; }
+  .kpi .l { font-size: 12px; color: var(--muted); }
+  .bars { display: grid; gap: 8px; }
+  .bar { display: grid; grid-template-columns: 150px 1fr 40px; gap: 8px; align-items: center; font-size: 13px; }
+  .bar .track { background: #f3eceb; border-radius: 6px; height: 18px; overflow: hidden; }
+  .bar .fill { background: var(--red); height: 100%; width: 0; transition: width .3s; }
+  .log { font-family: var(--mono); font-size: 12px; background: #1f1b1a; color: #f3e9e7; border-radius: 8px; padding: 10px 12px; max-height: 220px; overflow: auto; white-space: pre-wrap; margin-top: 10px; }
+  footer { color: var(--muted); font-size: 12px; text-align: center; padding: 16px; }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Demo Console · Hệ thống đặt vé xem phim phân tán</h1>
+    <div class="sub" id="nodeSub">Cụm 2 máy · PostgreSQL Primary/Standby + repmgr · Redis Master/Replica · RabbitMQ</div>
+  </div>
+  <div class="status"><span class="dot" id="gwDot"></span><span id="gwText">Đang kết nối gateway…</span></div>
+</header>
+
+<nav>
+  <button data-tab="system" class="active">① Sơ đồ ghế &amp; tranh ghế</button>
+  <button data-tab="cluster">② Trạng thái cụm (trực tiếp)</button>
+  <button data-tab="scale">③ Cân bằng tải</button>
+</nav>
+
+<main>
+  <!-- ===================== TAB 1: SEATS ===================== -->
+  <section class="tab active" id="tab-system">
+    <div class="theory">
+      <b>Kiểm soát đồng thời:</b> 10 yêu cầu gửi <i>cùng lúc</i> giành ghế cuối A20. Dù chúng đi qua máy nào, mọi lệnh ghi đều về
+      <b>một PostgreSQL Primary</b>, nơi khoá dòng (pessimistic) hoặc so phiên bản (optimistic) bảo đảm chỉ một người thắng.
+    </div>
+    <div class="grid g2">
+      <div class="card">
+        <h2>Sơ đồ ghế – suất chiếu #1</h2>
+        <p class="hint" id="showtimeInfo">Đang tải…</p>
+        <div class="seats" id="seatMap"></div>
+        <div class="screen">MÀN HÌNH</div>
+        <div class="btns" style="margin-top:14px">
+          <button class="act ghost" id="btnReset">↺ Reset (A20 trống)</button>
+          <button class="act" id="btnRace">⚡ 10 khách cùng đặt A20</button>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Kết quả 10 yêu cầu đồng thời</h2>
+        <p class="hint">Mỗi dòng là một yêu cầu HTTP độc lập gửi tới <span class="mono">POST /booking</span>.</p>
+        <table>
+          <thead><tr><th>#</th><th>Khách</th><th>HTTP</th><th>Độ trễ</th><th>Xử lý bởi</th></tr></thead>
+          <tbody id="raceBody"><tr><td colspan="5" class="hint">Bấm “10 khách cùng đặt A20”.</td></tr></tbody>
+        </table>
+        <div class="summary" id="raceSummary" hidden></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== TAB 2: CLUSTER ===================== -->
+  <section class="tab" id="tab-cluster">
+    <div class="theory">
+      <b>Mở trang này trên máy 2 trong lúc demo failover:</b> khi Primary ở máy 1 sập, sau vài giây vai trò sẽ đổi ngay trên bảng
+      (cập nhật mỗi 2 giây). Mọi số liệu do gateway của máy đang mở trang này tự đọc từ pg-router, Redis, RabbitMQ.
+    </div>
+    <div class="card">
+      <h2>Cụm CSDL — ai đang là Primary?</h2>
+      <p class="hint" id="routerHint">Đang tải…</p>
+      <table>
+        <thead><tr><th>Cụm</th><th>Nút (địa chỉ)</th><th>Vai trò thực tế</th><th>Timeline</th><th>repmgr</th></tr></thead>
+        <tbody id="dbBody"></tbody>
+      </table>
+      <div class="log" id="routerLog" hidden></div>
+    </div>
+    <div class="grid g2" style="margin-top:16px">
+      <div class="card">
+        <h2>Máy này</h2>
+        <div class="kpis" id="nodeKpis"></div>
+      </div>
+      <div class="card">
+        <h2>Circuit breaker của gateway</h2>
+        <table>
+          <thead><tr><th>Mạch</th><th>Trạng thái</th><th>Lỗi liên tiếp</th><th>Lỗi gần nhất</th></tr></thead>
+          <tbody id="cbBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== TAB 3: SCALE ===================== -->
+  <section class="tab" id="tab-scale">
+    <div class="card">
+      <h2>Nhân bản booking-service – Nginx gRPC LB chia tải</h2>
+      <p class="hint">Chạy <span class="mono">node demo/08-mo-rong.mjs</span> (hoặc <span class="mono">--scale booking-service=3</span>) rồi bấm đo.</p>
+      <div class="btns"><button class="act" id="btnDist">▶ Gửi 12 lượt đặt vé tuần tự</button></div>
+      <div class="bars" id="distBars"></div>
+      <div class="log" id="distLog" hidden></div>
+    </div>
+  </section>
+</main>
+<footer id="footer">API Gateway · <span class="mono" id="origin"></span></footer>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+$('origin').textContent = location.origin;
+
+async function api(path, opts = {}) {
+  const t0 = performance.now();
+  const res = await fetch(path, { headers: { 'Content-Type': 'application/json' }, cache: 'no-store', ...opts });
+  let body = null;
+  try { body = await res.json(); } catch { body = null; }
+  return { status: res.status, body, ms: Math.round(performance.now() - t0) };
+}
+
+// ---------- tabs ----------
+let activeTab = 'system';
+document.querySelectorAll('nav button').forEach((b) => b.addEventListener('click', () => {
+  activeTab = b.dataset.tab;
+  document.querySelectorAll('nav button').forEach((x) => x.classList.toggle('active', x === b));
+  document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.id === 'tab-' + activeTab));
+  if (activeTab === 'cluster') loadCluster();
+}));
+
+// ---------- gateway status ----------
+async function ping() {
+  try {
+    const r = await api('/health');
+    $('gwDot').className = 'dot ok';
+    $('gwText').textContent = `${r.body.nodeId === 'node2' ? 'MÁY 2' : 'MÁY 1'} · gateway ${r.body.hostname}`;
+  } catch {
+    $('gwDot').className = 'dot bad';
+    $('gwText').textContent = 'Gateway không phản hồi';
+  }
+}
+
+// ---------- seats ----------
+async function loadSeats(flashId) {
+  try {
+    const r = await api('/movies/1');
+    if (!r.body.seats) { $('showtimeInfo').textContent = r.body.message || 'Dịch vụ kho ghế không phản hồi'; return; }
+    const { showtime } = r.body;
+    const seats = [...r.body.seats].sort((a, b) => Number(a.id) - Number(b.id));
+    $('showtimeInfo').textContent = `${showtime.movieName} · ${showtime.room} · ${seats.filter((s) => s.status === 'available').length} ghế trống`;
+    $('seatMap').innerHTML = seats.map((s) => `<div class="seat ${s.status} ${s.id === flashId ? 'flash' : ''}">${esc(s.seatCode)}</div>`).join('');
+  } catch (e) {
+    $('showtimeInfo').textContent = 'Không đọc được sơ đồ ghế: ' + e.message;
+  }
+}
+
+$('btnReset').onclick = async () => {
+  await api('/dev/reset', { method: 'POST' });
+  await loadSeats();
+};
+
+$('btnRace').onclick = async () => {
+  const btn = $('btnRace'); btn.disabled = true;
+  await api('/dev/reset', { method: 'POST' });
+  await loadSeats();
+  $('raceBody').innerHTML = '<tr><td colspan="5" class="hint">Đang bắn 10 yêu cầu cùng lúc…</td></tr>';
+  const t0 = performance.now();
+  const results = await Promise.all(Array.from({ length: 10 }, (_, i) =>
+    api('/booking', { method: 'POST', body: JSON.stringify({ showtimeId: '1', seatId: '20', userName: `Khach_${String(i + 1).padStart(2, '0')}` }) })
+      .then((r) => ({ i: i + 1, ...r }))
+      .catch((e) => ({ i: i + 1, status: 0, body: { message: e.message }, ms: 0 }))));
+  const total = Math.round(performance.now() - t0);
+  const ok = results.filter((r) => r.status === 201);
+  const conflict = results.filter((r) => r.status === 409);
+  $('raceBody').innerHTML = results.map((r) => {
+    const pill = r.status === 201 ? 'ok' : r.status === 409 ? 'bad' : 'warn';
+    const host = r.status === 201 ? `${r.body.nodeId} · ${r.body.processedByHost}` : (r.body && r.body.message) || '';
+    return `<tr><td>${r.i}</td><td>Khach_${String(r.i).padStart(2, '0')}</td><td><span class="pill ${pill}">${r.status}</span></td><td class="mono">${r.ms} ms</td><td class="mono">${esc(host)}</td></tr>`;
+  }).join('');
+  const s = $('raceSummary'); s.hidden = false;
+  s.innerHTML = ok.length === 1 && conflict.length === 9
+    ? `✅ <b>Đúng 1 vé được bán</b> (${esc(ok[0].body.userName)}), 9 yêu cầu bị từ chối <b>409 Conflict</b>. Tổng thời gian ${total} ms — không có bán trùng.`
+    : `⚠️ Kết quả bất thường: ${ok.length} thành công, ${conflict.length} xung đột. Kiểm tra lại cụm.`;
+  await loadSeats('20');
+  btn.disabled = false;
+};
+
+// ---------- cluster ----------
+const rolePill = (state) => ({ primary: '<span class="pill bad">PRIMARY</span>', standby: '<span class="pill info">STANDBY</span>', down: '<span class="pill warn">KHÔNG PHẢN HỒI</span>' }[state] || `<span class="pill warn">${esc(state)}</span>`);
+
+async function loadCluster() {
+  let d;
+  try { d = (await api('/lab/cluster')).body; } catch { return; }
+  const rt = d.router;
+  if (!rt || !rt.ok) {
+    $('routerHint').textContent = 'Không đọc được pg-router (chạy bằng docker-compose gốc 1 máy?)';
+  } else {
+    $('routerHint').innerHTML = `pg-router của <b>${d.nodeId === 'node2' ? 'MÁY 2' : 'MÁY 1'}</b> kiểm tra mọi nút mỗi giây · cập nhật ${new Date(d.timestamp).toLocaleTimeString()}`;
+    $('dbBody').innerHTML = rt.routes.flatMap((r) => r.backends.map((b, i) => {
+      const rep = r.repmgr.find((x) => x.node_id === i + 1);
+      return `<tr><td><b>${esc(r.name)}</b></td><td class="mono">${esc(b.addr)} ${r.primary === b.addr ? '◀ ghi vào đây' : ''}</td><td>${rolePill(b.state)}</td><td class="mono">${b.timeline ?? '–'}</td><td class="mono">${rep ? `${esc(rep.node_name)} (${esc(rep.location)}) = ${esc(rep.type)}${rep.active ? '' : ' ✗'}` : ''}</td></tr>`;
+    }).concat(r.repmgr.filter((x) => x.type === 'witness').map((w) => `<tr><td></td><td class="mono">${esc(w.node_name)}</td><td><span class="pill ok">WITNESS</span></td><td>–</td><td class="mono">trọng tài · vị trí ${esc(w.location)}</td></tr>`))).join('');
+    const hist = rt.routes.flatMap((r) => r.history.map((h) => ({ ...h, name: r.name }))).sort((a, b) => a.at.localeCompare(b.at)).slice(-6);
+    const log = $('routerLog'); log.hidden = hist.length === 0;
+    log.textContent = hist.map((h) => `${h.at.slice(11, 19)}  ${h.name.padEnd(9)} PRIMARY ${h.from || '(không có)'} → ${h.to || '(không có)'}`).join('\n');
+  }
+  const inv = d.inventory;
+  const kpi = (v, l) => `<div class="kpi"><div class="v">${esc(v)}</div><div class="l">${esc(l)}</div></div>`;
+  $('nodeKpis').innerHTML = [
+    kpi(d.booking.length, 'bản sao booking-service'),
+    kpi(inv.ok ? inv.db.read.role : 'lỗi', 'CSDL đọc tại chỗ'),
+    kpi(inv.ok ? inv.redis.read.role : 'lỗi', 'Redis đọc tại chỗ'),
+    kpi(inv.ok ? inv.lockStrategy : '–', 'chiến lược khoá'),
+    kpi(d.queue.ok ? d.queue.ready : '–', 'thông điệp chờ trong hàng đợi'),
+    kpi(d.queue.ok ? d.queue.consumers : '–', 'consumer (notification)'),
+    kpi(inv.ok ? `${inv.stats.cacheHits}/${inv.stats.cacheHits + inv.stats.cacheMisses}` : '–', 'lượt đọc trúng cache'),
+  ].join('');
+  $('cbBody').innerHTML = Object.values(d.gateway.circuits).map((c) => {
+    const pill = c.state === 'CLOSED' ? 'ok' : c.state === 'OPEN' ? 'bad' : 'warn';
+    return `<tr><td class="mono">${esc(c.name)}</td><td><span class="pill ${pill}">${c.state}</span></td><td>${c.failureCount}</td><td class="mono">${c.lastFailureTime ? new Date(c.lastFailureTime).toLocaleTimeString() : '–'}</td></tr>`;
+  }).join('');
+}
+
+// ---------- load distribution ----------
+$('btnDist').onclick = async () => {
+  const btn = $('btnDist'); btn.disabled = true;
+  const counts = {}; const lines = [];
+  const log = $('distLog'); log.hidden = false; log.textContent = '';
+  for (let i = 1; i <= 12; i++) {
+    await api('/dev/reset', { method: 'POST' });
+    const r = await api('/booking', { method: 'POST', body: JSON.stringify({ showtimeId: '1', seatId: '20', userName: `Load_${i}` }) });
+    const host = r.status === 201 ? r.body.processedByHost : `HTTP ${r.status}`;
+    counts[host] = (counts[host] || 0) + 1;
+    lines.push(`Lượt ${String(i).padStart(2, '0')} → booking-service [${host}] (${r.ms} ms)`);
+    log.textContent = lines.join('\n'); log.scrollTop = log.scrollHeight;
+    $('distBars').innerHTML = Object.entries(counts).map(([h, c]) =>
+      `<div class="bar"><span class="mono">${esc(h)}</span><div class="track"><div class="fill" style="width:${c / 12 * 100}%"></div></div><b>${c}</b></div>`).join('');
+  }
+  btn.disabled = false;
+  loadSeats();
+};
+
+ping(); setInterval(ping, 5000);
+loadSeats(); setInterval(() => activeTab === 'system' && loadSeats(), 5000);
+setInterval(() => activeTab === 'cluster' && loadCluster(), 2000);
+</script>
+</body>
+</html>

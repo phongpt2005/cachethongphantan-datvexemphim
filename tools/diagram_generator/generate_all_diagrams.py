@@ -6,7 +6,7 @@ Bộ sinh sơ đồ kiến trúc phân tán chuẩn kỹ thuật (Engineering Di
 - Hầu hết các khối hộp dùng nền trắng (#ffffff) viền nét đơn (#334155, #64748b), chỉ dùng màu nhấn đậm (deep blue #1e40af, dark red #991b1b, forest green #166534) cho viền và tiêu đề để phân biệt vai trò.
 - Loại bỏ toàn bộ emoji AI (✅, ❌, ⏳, ⚠️). Thay bằng ký hiệu kỹ thuật chuẩn ([OK], [LỖI], [CHỜ], [THÀNH CÔNG]).
 - Không có hộp chú thích xám ở góc trên phải.
-- Xuất file PNG trực tiếp vào c:\phantan\diagrams (thư mục này CHỈ chứa ảnh .png).
+- Xuất file PNG vào thư mục diagrams/ của repo (thư mục này CHỈ chứa ảnh .png).
 """
 
 import os
@@ -17,8 +17,8 @@ import sys
 if sys.stdout.encoding != 'utf-8':
     sys.stdout.reconfigure(encoding='utf-8')
 
-OUTPUT_IMAGE_DIR = r"c:\phantan\diagrams"
-TOOLS_DIR = r"c:\phantan\tools\diagram_generator"
+TOOLS_DIR = os.path.dirname(os.path.abspath(__file__))
+OUTPUT_IMAGE_DIR = os.path.join(os.path.dirname(os.path.dirname(TOOLS_DIR)), "diagrams")
 EDGE_EXE = r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
 
 os.makedirs(OUTPUT_IMAGE_DIR, exist_ok=True)
@@ -104,21 +104,21 @@ svg_01 = """
   <!-- Client Layer -->
   <rect x="540" y="10" width="400" height="50" fill="#ffffff" stroke="#1e293b" stroke-width="1.5" />
   <text x="740" y="32" fill="#0f172a" font-size="13" font-weight="bold" text-anchor="middle">CLIENTS / TRÌNH DUYỆT / KỊCH BẢN KIỂM THỬ</text>
-  <text x="740" y="48" fill="#475569" font-size="11" text-anchor="middle">Truy cập tập trung qua 1 Virtual IP duy nhất: http://10.0.0.1 (Tính trong suốt)</text>
+  <text x="740" y="48" fill="#475569" font-size="11" text-anchor="middle">Một địa chỉ duy nhất: http://192.168.43.13:8090 (trong suốt)</text>
 
   <!-- Line Client -> Nginx LB -->
   <line x1="740" y1="60" x2="740" y2="95" stroke="#1e293b" stroke-width="1.5" marker-end="url(#m-arr)" />
-  <text x="750" y="82" fill="#1e293b" font-size="11" font-weight="bold">HTTP :80</text>
+  <text x="750" y="82" fill="#1e293b" font-size="11" font-weight="bold">HTTP :8090</text>
 
   <!-- Frontend LB -->
   <rect x="420" y="95" width="640" height="70" fill="#ffffff" stroke="#1e40af" stroke-width="2" />
-  <text x="740" y="118" fill="#1e40af" font-size="13" font-weight="bold" text-anchor="middle">FRONTEND LOAD BALANCER (Nginx Reverse Proxy)</text>
-  <text x="740" y="136" fill="#0f172a" font-size="11" text-anchor="middle">Cơ chế bảo vệ: Rate Limiting 100 req/s (burst=50 nodelay) — Chống ngập lụt</text>
-  <text x="740" y="153" fill="#475569" font-size="11" text-anchor="middle">Thuật toán phân phối: least_conn | Node 1 (10.0.0.1, w=2) | Node 2 (10.0.0.2, w=1)</text>
+  <text x="740" y="118" fill="#1e40af" font-size="13" font-weight="bold" text-anchor="middle">FRONTEND LOAD BALANCER (Nginx) — chạy trên NODE 3</text>
+  <text x="740" y="136" fill="#0f172a" font-size="11" text-anchor="middle">Cơ chế bảo vệ: Rate Limiting 200 req/s (burst=100) — Máy lỗi (timeout / 503) tự bị né</text>
+  <text x="740" y="153" fill="#475569" font-size="11" text-anchor="middle">Thuật toán phân phối: round-robin | Máy 1 (192.168.43.11:3000) | Máy 2 (192.168.43.12:3100)</text>
 
-  <!-- WireGuard Banner -->
+  <!-- mạng LAN Banner -->
   <rect x="20" y="185" width="1440" height="30" fill="#ffffff" stroke="#1e40af" stroke-dasharray="6,3" stroke-width="1.2" />
-  <text x="740" y="205" fill="#1e40af" font-size="11.5" font-weight="bold" text-anchor="middle">KÊNH TRUYỀN MÃ HÓA WIREGUARD VPN (MẠNG RIÊNG ẢO 10.0.0.0/24 NỐI 2 MÁY VẬT LÝ QUA INTERNET)</text>
+  <text x="740" y="205" fill="#1e40af" font-size="11.5" font-weight="bold" text-anchor="middle">MẠNG LAN NỘI BỘ (WI-FI / HOTSPOT 192.168.43.0/24) — KẾT NỐI 3 MÁY TRONG CÙNG PHÒNG</text>
 
   <!-- Routing Lines to Gateways -->
   <path d="M 590 165 L 590 185 L 280 185 L 280 235" fill="none" stroke="#1e40af" stroke-width="1.5" marker-end="url(#m-blue)" />
@@ -127,7 +127,7 @@ svg_01 = """
   <!-- ==================== NODE 1 ==================== -->
   <rect x="20" y="235" width="560" height="585" fill="#ffffff" stroke="#1e293b" stroke-width="1.8" />
   <rect x="20" y="235" width="560" height="30" fill="#1e293b" />
-  <text x="35" y="255" fill="#ffffff" font-size="12" font-weight="bold">MÁY VẬT LÝ 1 — PRIMARY NODE (IP: 10.0.0.1)</text>
+  <text x="35" y="255" fill="#ffffff" font-size="12" font-weight="bold">MÁY VẬT LÝ 1 — PRIMARY NODE (IP: 192.168.43.11)</text>
 
   <!-- Node 1: API Gateway -->
   <rect x="40" y="280" width="520" height="45" fill="#ffffff" stroke="#334155" stroke-width="1.2" />
@@ -137,7 +137,7 @@ svg_01 = """
   <!-- Node 1: Booking LB & Inventory -->
   <rect x="40" y="340" width="250" height="50" fill="#ffffff" stroke="#475569" />
   <text x="165" y="362" fill="#0f172a" font-size="11.5" font-weight="bold" text-anchor="middle">booking-lb #1 (Nginx :50051)</text>
-  <text x="165" y="378" fill="#475569" font-size="10" text-anchor="middle">gRPC Round-Robin -> 2 instance</text>
+  <text x="165" y="378" fill="#475569" font-size="10" text-anchor="middle">gRPC Round-Robin -> N instance</text>
 
   <rect x="310" y="340" width="250" height="50" fill="#ffffff" stroke="#475569" />
   <text x="435" y="362" fill="#0f172a" font-size="11.5" font-weight="bold" text-anchor="middle">inventory-service #1 (:50052)</text>
@@ -154,7 +154,7 @@ svg_01 = """
 
   <!-- Node 1: RabbitMQ -->
   <rect x="310" y="405" width="250" height="40" fill="#ffffff" stroke="#1e293b" />
-  <text x="435" y="425" fill="#0f172a" font-size="11" font-weight="bold" text-anchor="middle">RabbitMQ #1 (Cluster Node)</text>
+  <text x="435" y="425" fill="#0f172a" font-size="11" font-weight="bold" text-anchor="middle">RabbitMQ #1 (Raft — nút 1/3)</text>
   <text x="435" y="438" fill="#475569" font-size="9.5" text-anchor="middle">Quorum Queue 'booking.confirmed' (Raft)</text>
 
   <!-- Node 1: Notification & Redis -->
@@ -178,25 +178,24 @@ svg_01 = """
   <text x="435" y="574" fill="#475569" font-size="9.5" text-anchor="middle">repmgrd node_id=1 (priority=100)</text>
 
   <rect x="40" y="605" width="520" height="35" fill="#ffffff" stroke="#94a3b8" />
-  <text x="300" y="627" fill="#0f172a" font-size="10.5" text-anchor="middle">Vai trò: Đảm nhận ghi vé | Xoá cache Master | Phát WAL Replication sang Máy 2</text>
+  <text x="300" y="627" fill="#0f172a" font-size="10.5" text-anchor="middle">Vai trò: Ghi vé | Phát WAL sang Máy 2 | Mất quorum (chỉ thấy 1/3) → tự chặn ghi</text>
 
 
   <!-- ==================== NODE 3: WITNESS ==================== -->
   <rect x="610" y="380" width="260" height="190" fill="#ffffff" stroke="#1e293b" stroke-width="1.5" stroke-dasharray="4,2" />
   <rect x="610" y="380" width="260" height="28" fill="#334155" />
   <text x="740" y="399" fill="#ffffff" font-size="11" font-weight="bold" text-anchor="middle">NODE 3: TRỌNG TÀI (WITNESS)</text>
-  <text x="740" y="425" fill="#0f172a" font-size="11" font-weight="bold" text-anchor="middle">repmgr Witness (IP: 10.0.0.3)</text>
-  <text x="740" y="445" fill="#475569" font-size="10" text-anchor="middle">Cài đặt trên VPS hoặc máy tính thứ ba</text>
-  <text x="740" y="468" fill="#0f172a" font-size="10.5" text-anchor="middle">• Priority = 0 (Tuyệt đối không làm Master)</text>
-  <text x="740" y="488" fill="#0f172a" font-size="10.5" text-anchor="middle">• Bỏ phiếu Quorum: Đảm bảo đa số 2/3</text>
-  <text x="740" y="512" fill="#991b1b" font-size="10.5" font-weight="bold" text-anchor="middle">CHỐNG NÃO CHIA CẮT (SPLIT-BRAIN)</text>
-  <text x="740" y="532" fill="#475569" font-size="9.5" text-anchor="middle">Tiến trình nhẹ độc lập (~30MB RAM)</text>
+  <text x="740" y="425" fill="#0f172a" font-size="11" font-weight="bold" text-anchor="middle">Witness ×2 + RabbitMQ #3 (IP: 192.168.43.13)</text>
+  <text x="740" y="445" fill="#475569" font-size="10" text-anchor="middle">Laptop thứ ba, cùng mạng LAN</text>
+  <text x="740" y="463" fill="#0f172a" font-size="10.5" text-anchor="middle">• Bỏ phiếu đa số 2/3 + phủ quyết</text>
+  <text x="740" y="508" fill="#991b1b" font-size="10.5" font-weight="bold" text-anchor="middle">CHỐNG NÃO CHIA CẮT (SPLIT-BRAIN)</text>
+  <text x="740" y="527" fill="#475569" font-size="9.5" text-anchor="middle">Không chứa dữ liệu · priority 0 (không làm Master)</text>
 
 
   <!-- ==================== NODE 2 ==================== -->
   <rect x="900" y="235" width="560" height="585" fill="#ffffff" stroke="#1e293b" stroke-width="1.8" />
   <rect x="900" y="235" width="560" height="30" fill="#1e293b" />
-  <text x="915" y="255" fill="#ffffff" font-size="12" font-weight="bold">MÁY VẬT LÝ 2 — SECONDARY NODE (IP: 10.0.0.2)</text>
+  <text x="915" y="255" fill="#ffffff" font-size="12" font-weight="bold">MÁY VẬT LÝ 2 — SECONDARY NODE (IP: 192.168.43.12)</text>
 
   <!-- Node 2: API Gateway -->
   <rect x="920" y="280" width="520" height="45" fill="#ffffff" stroke="#334155" stroke-width="1.2" />
@@ -210,7 +209,7 @@ svg_01 = """
 
   <rect x="1190" y="340" width="250" height="50" fill="#ffffff" stroke="#475569" />
   <text x="1315" y="362" fill="#0f172a" font-size="11.5" font-weight="bold" text-anchor="middle">inventory-service #2 (:50052)</text>
-  <text x="1315" y="378" fill="#475569" font-size="10" text-anchor="middle">Đọc Replica Local, Ghi Master 10.0.0.1</text>
+  <text x="1315" y="378" fill="#475569" font-size="10" text-anchor="middle">Đọc Standby local, Ghi → Primary hiện tại (pg-router)</text>
 
   <!-- Node 2: Booking Instance -->
   <rect x="920" y="405" width="250" height="40" fill="#ffffff" stroke="#64748b" />
@@ -219,7 +218,7 @@ svg_01 = """
 
   <!-- Node 2: RabbitMQ -->
   <rect x="1190" y="405" width="250" height="40" fill="#ffffff" stroke="#1e293b" />
-  <text x="1315" y="425" fill="#0f172a" font-size="11" font-weight="bold" text-anchor="middle">RabbitMQ #2 (Cluster Node)</text>
+  <text x="1315" y="425" fill="#0f172a" font-size="11" font-weight="bold" text-anchor="middle">RabbitMQ #2 (Raft — nút 2/3)</text>
   <text x="1315" y="438" fill="#475569" font-size="9.5" text-anchor="middle">Quorum Queue 'booking.confirmed' (Raft)</text>
 
   <!-- Node 2: Notification & Redis -->
@@ -229,7 +228,7 @@ svg_01 = """
 
   <rect x="1190" y="460" width="250" height="40" fill="#ffffff" stroke="#475569" stroke-width="1.5" />
   <text x="1315" y="480" fill="#0f172a" font-size="11" font-weight="bold" text-anchor="middle">Redis #2 (REPLICA :6379)</text>
-  <text x="1315" y="493" fill="#475569" font-size="9" text-anchor="middle">replicaof 10.0.0.1 6379 (Phục vụ đọc RAM tại chỗ)</text>
+  <text x="1315" y="493" fill="#475569" font-size="9" text-anchor="middle">replicaof 192.168.43.11 6379 (Phục vụ đọc RAM tại chỗ)</text>
 
   <!-- Node 2: Databases -->
   <rect x="920" y="515" width="250" height="75" fill="#ffffff" stroke="#475569" stroke-width="1.5" />
@@ -243,23 +242,23 @@ svg_01 = """
   <text x="1315" y="574" fill="#475569" font-size="9.5" text-anchor="middle">repmgrd node_id=2 (priority=90)</text>
 
   <rect x="920" y="605" width="520" height="35" fill="#ffffff" stroke="#94a3b8" />
-  <text x="1180" y="627" fill="#0f172a" font-size="10.5" text-anchor="middle">Vai trò: Phục vụ toàn bộ đọc | Nhận Replay WAL | Tự lên Primary nếu Máy 1 sập</text>
+  <text x="1180" y="627" fill="#0f172a" font-size="10.5" text-anchor="middle">Vai trò: Phục vụ đọc | Nhận WAL | Tự lên Primary khi đủ 2/3 phiếu (cùng Node 3)</text>
 
   <!-- Cross-node Synchronization Lines -->
   <line x1="560" y1="550" x2="920" y2="550" stroke="#166534" stroke-width="1.8" stroke-dasharray="5,3" marker-end="url(#m-green)" />
   <rect x="650" y="538" width="180" height="20" fill="#ffffff" stroke="#166534" />
-  <text x="740" y="552" fill="#166534" font-size="10" font-weight="bold" text-anchor="middle">WAL Streaming Replication</text>
+  <text x="740" y="552" fill="#166534" font-size="10" font-weight="bold" text-anchor="middle">WAL Streaming ×2 (mỗi CSDL)</text>
 
-  <line x1="560" y1="480" x2="1190" y2="480" stroke="#1e293b" stroke-width="1.5" stroke-dasharray="4,3" />
+  <path d="M 560 480 L 905 480 L 905 452 L 1180 452 L 1180 480 L 1188 480" fill="none" stroke="#1e293b" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#m-arr)" />
   <rect x="650" y="470" width="180" height="20" fill="#ffffff" stroke="#1e293b" />
   <text x="740" y="484" fill="#0f172a" font-size="10" font-weight="bold" text-anchor="middle">Redis DEL Replication Stream</text>
 
   <!-- Bottom Explanatory Row -->
   <rect x="20" y="740" width="1440" height="85" fill="#ffffff" stroke="#cbd5e1" />
   <text x="40" y="763" fill="#0f172a" font-size="11.5" font-weight="bold">ĐẶC TÍNH CỐT LÕI CỦA HỆ THỐNG PHÂN TÁN ĐÃ HIỆN THỰC HOÁ:</text>
-  <text x="40" y="783" fill="#334155" font-size="11">1. Tính trong suốt (Transparency): Client chỉ gọi 1 cổng duy nhất, Nginx tự điều phối 2 máy vật lý.</text>
-  <text x="40" y="801" fill="#334155" font-size="11">2. Tính sẵn sàng cao (High Availability): Cơ sở dữ liệu tự động failover sang Máy 2 trong &lt; 25 giây khi Máy 1 sập nguồn.</text>
-  <text x="40" y="819" fill="#334155" font-size="11">3. Khả năng mở rộng (Scalability): Tách rời luồng Đọc (Máy 2) và luồng Ghi (Máy 1), giảm 85% áp lực lên máy chủ chính.</text>
+  <text x="40" y="783" fill="#334155" font-size="11">1. Tính trong suốt (Transparency): Client chỉ gọi 1 địa chỉ (Frontend LB trên Node 3), Nginx tự điều phối và né máy lỗi.</text>
+  <text x="40" y="801" fill="#334155" font-size="11">2. Sẵn sàng cao + chống split-brain: Máy 1 sập → Máy 2 + Node 3 (2/3 phiếu) tự failover ~20 s; máy bị cô lập tự chặn ghi, nối lại tự về Standby.</text>
+  <text x="40" y="819" fill="#334155" font-size="11">3. Mở rộng & chịu lỗi: Đọc tại chỗ ở mỗi máy, ghi về Primary; RabbitMQ quorum queue 3 nút chịu được chết 1 nút.</text>
 </svg>
 """
 
@@ -275,17 +274,17 @@ svg_02 = """
   <!-- Left: Network Partition (Split-brain prevention) -->
   <rect x="20" y="65" width="710" height="735" fill="#ffffff" stroke="#334155" stroke-width="1.5" />
   <rect x="20" y="65" width="710" height="30" fill="#334155" />
-  <text x="35" y="85" fill="#ffffff" font-size="12" font-weight="bold">TÌNH HUỐNG 1: ĐỨT MẠNG VPN (MÁY 1 VẪN SỐNG) — CHỐNG 2 MASTER (SPLIT-BRAIN)</text>
+  <text x="35" y="85" fill="#ffffff" font-size="12" font-weight="bold">TÌNH HUỐNG 1: ĐỨT MẠNG LAN (MÁY 1 VẪN SỐNG) — CHỐNG 2 MASTER (SPLIT-BRAIN)</text>
 
   <rect x="40" y="110" width="670" height="65" fill="#ffffff" stroke="#64748b" />
-  <text x="55" y="130" fill="#0f172a" font-size="11.5" font-weight="bold">1. Sự cố: Mạng WireGuard VPN giữa Máy 1 và Máy 2 bị ngắt đoạn</text>
+  <text x="55" y="130" fill="#0f172a" font-size="11.5" font-weight="bold">1. Sự cố: Mạng mạng LAN giữa Máy 1 và Máy 2 bị ngắt đoạn</text>
   <text x="55" y="148" fill="#475569" font-size="11">• Máy 1 vẫn hoạt động bình thường, database master vẫn nhận ghi từ Client kết nối tới Máy 1.</text>
-  <text x="55" y="164" fill="#475569" font-size="11">• Máy 2 bị mất tín hiệu ping tới 10.0.0.1:5501 (timeout sau 4 lần thử = 15 giây).</text>
+  <text x="55" y="164" fill="#475569" font-size="11">• Máy 2 bị mất tín hiệu ping tới 192.168.43.11:5501 (timeout sau 4 lần thử = 15 giây).</text>
 
   <rect x="40" y="190" width="670" height="130" fill="#ffffff" stroke="#64748b" />
   <text x="55" y="212" fill="#0f172a" font-size="11.5" font-weight="bold">2. repmgrd trên Máy 2 kích hoạt quy trình hỏi Trọng tài (Witness):</text>
   <text x="70" y="232" fill="#0f172a" font-size="11">• Máy 2 KHÔNG ĐƯỢC TỰ Ý PROMOTE! Nó gửi truy vấn tới Witness: "Máy 1 còn sống không?"</text>
-  <text x="70" y="252" fill="#0f172a" font-size="11">• Witness Node 3 (10.0.0.3) vẫn ping được Máy 1 bình thường và phản hồi: "Máy 1 VẪN SỐNG!"</text>
+  <text x="70" y="252" fill="#0f172a" font-size="11">• Witness Node 3 (192.168.43.13) vẫn ping được Máy 1 bình thường và phản hồi: "Máy 1 VẪN SỐNG!"</text>
   <text x="70" y="272" fill="#991b1b" font-size="11.5" font-weight="bold">• Đếm phiếu của Máy 2: Chỉ có 1 phiếu (chính nó) &lt; 2 phiếu -&gt; THIẾU QUORUM!</text>
   <text x="70" y="292" fill="#166534" font-size="11">• Đếm phiếu của Máy 1: Máy 1 (1 phiếu) + Witness (1 phiếu) = 2/3 phiếu -&gt; ĐỦ QUORUM!</text>
   <text x="70" y="310" fill="#0f172a" font-size="11" font-weight="bold">-&gt; Quyết định: Máy 2 TỪ CHỐI THĂNG CẤP. Giữ nguyên chế độ Standby Read-Only.</text>
@@ -298,7 +297,7 @@ svg_02 = """
   <text x="150" y="425" fill="#0f172a" font-size="10.5" text-anchor="middle">DUY TRÌ MASTER</text>
 
   <line x1="240" y1="390" x2="490" y2="390" stroke="#991b1b" stroke-width="2" stroke-dasharray="4,4" />
-  <text x="365" y="383" fill="#991b1b" font-size="10.5" font-weight="bold" text-anchor="middle">ĐỨT KẾT NỐI VPN</text>
+  <text x="365" y="383" fill="#991b1b" font-size="10.5" font-weight="bold" text-anchor="middle">ĐỨT KẾT NỐI MẠNG</text>
 
   <rect x="500" y="335" width="190" height="110" fill="#ffffff" stroke="#334155" stroke-width="1.5" />
   <text x="595" y="360" fill="#0f172a" font-size="12" font-weight="bold" text-anchor="middle">MÁY 2 (Standby)</text>
@@ -397,9 +396,9 @@ svg_03 = """
   <text x="545" y="330" fill="#475569" font-size="10" text-anchor="middle">await redisWrite.setex('seats:1', 15, data)</text>
 
   <rect x="40" y="365" width="670" height="140" fill="#ffffff" stroke="#64748b" />
-  <text x="55" y="388" fill="#0f172a" font-size="11.5" font-weight="bold">2. Phân phối tải trên cụm Redis Master-Replica qua VPN:</text>
-  <text x="70" y="408" fill="#475569" font-size="11">• Tiến trình trên Máy 1 đọc từ Redis Master local (10.0.0.1:6379).</text>
-  <text x="70" y="426" fill="#475569" font-size="11">• Tiến trình trên Máy 2 đọc từ Redis Replica local (10.0.0.2:6379).</text>
+  <text x="55" y="388" fill="#0f172a" font-size="11.5" font-weight="bold">2. Phân phối tải trên cụm Redis Master-Replica qua mạng LAN:</text>
+  <text x="70" y="408" fill="#475569" font-size="11">• Tiến trình trên Máy 1 đọc từ Redis Master local (192.168.43.11:6379).</text>
+  <text x="70" y="426" fill="#475569" font-size="11">• Tiến trình trên Máy 2 đọc từ Redis Replica local (192.168.43.12:6379).</text>
   <text x="70" y="446" fill="#166534" font-size="11" font-weight="bold">• Khi có người đặt vé: Chỉ gửi lệnh DEL xoá cache về Redis Master.</text>
   <text x="70" y="464" fill="#0f172a" font-size="11">• Redis Master tự stream replication sang Redis Replica của Máy 2 trong &lt; 5ms.</text>
   <text x="70" y="484" fill="#0f172a" font-size="11" font-weight="bold">-&gt; Cả 2 máy đọc bộ nhớ đệm tại chỗ, không làm nghẽn đường truyền mạng WAN!</text>
@@ -425,7 +424,7 @@ svg_03 = """
   <rect x="770" y="215" width="670" height="135" fill="#ffffff" stroke="#475569" stroke-width="1.5" />
   <text x="785" y="240" fill="#0f172a" font-size="12" font-weight="bold">LUỒNG ĐỌC (READ PATH — 85% LƯU LƯỢNG):</text>
   <text x="800" y="265" fill="#0f172a" font-size="11">• listSeats(), getShowtime() sử dụng seatReadRepo và showtimeReadRepo.</text>
-  <text x="800" y="285" fill="#0f172a" font-size="11" font-weight="bold">• Điều hướng trực tiếp sang PostgreSQL Standby trên Máy 2 (10.0.0.2:5501).</text>
+  <text x="800" y="285" fill="#0f172a" font-size="11" font-weight="bold">• Điều hướng trực tiếp sang PostgreSQL Standby trên Máy 2 (192.168.43.12:5501).</text>
   <text x="800" y="305" fill="#475569" font-size="11">• Database Master tại Máy 1 hoàn toàn không phải tốn chu kỳ CPU nào để xử lý đọc.</text>
   <text x="800" y="325" fill="#166534" font-size="11" font-weight="bold">-&gt; Tận dụng tối đa tài nguyên RAM và SSD của máy chủ phụ (Node 2)!</text>
 
@@ -477,7 +476,7 @@ svg_04 = """
   <text x="200" y="390" fill="#166534" font-size="12" font-weight="bold" text-anchor="middle">KẾT QUẢ REQUEST 1 (THẮNG)</text>
   <text x="200" y="415" fill="#0f172a" font-size="13" font-weight="bold" text-anchor="middle">HTTP 201 CREATED</text>
   <text x="200" y="438" fill="#475569" font-size="11" text-anchor="middle">Đặt vé thành công Ghế A20</text>
-  <text x="200" y="458" fill="#166534" font-size="10.5" font-weight="bold" text-anchor="middle">Xoá cache Redis Master -&gt; Stream VPN</text>
+  <text x="200" y="458" fill="#166534" font-size="10.5" font-weight="bold" text-anchor="middle">Xoá cache Redis Master -&gt; Stream qua LAN</text>
 
   <rect x="380" y="365" width="330" height="110" fill="#ffffff" stroke="#991b1b" stroke-width="1.5" />
   <text x="545" y="390" fill="#991b1b" font-size="12" font-weight="bold" text-anchor="middle">KẾT QUẢ 9 REQUESTS CÒN LẠI</text>
@@ -514,7 +513,7 @@ svg_04 = """
   <text x="930" y="390" fill="#166534" font-size="12" font-weight="bold" text-anchor="middle">KẾT QUẢ REQUEST THẮNG</text>
   <text x="930" y="415" fill="#0f172a" font-size="13" font-weight="bold" text-anchor="middle">HTTP 201 CREATED</text>
   <text x="930" y="438" fill="#475569" font-size="11" text-anchor="middle">affected rows = 1 (Version mới: 2)</text>
-  <text x="930" y="458" fill="#166534" font-size="10.5" font-weight="bold" text-anchor="middle">Xoá cache Redis Master -&gt; Stream VPN</text>
+  <text x="930" y="458" fill="#166534" font-size="10.5" font-weight="bold" text-anchor="middle">Xoá cache Redis Master -&gt; Stream qua LAN</text>
 
   <rect x="1110" y="365" width="330" height="110" fill="#ffffff" stroke="#991b1b" stroke-width="1.5" />
   <text x="1275" y="390" fill="#991b1b" font-size="12" font-weight="bold" text-anchor="middle">KẾT QUẢ 9 REQUESTS THUA</text>
@@ -547,12 +546,12 @@ svg_05 = """
   <!-- Title Header -->
   <rect x="250" y="10" width="980" height="50" fill="#ffffff" stroke="#1e293b" stroke-width="1.5" />
   <text x="740" y="32" fill="#0f172a" font-size="13" font-weight="bold" text-anchor="middle">BÀI TOÁN: CHỐNG HIỆN TƯỢNG BÁN VÉ MA (GHOST BOOKING) KHI CHẠY TRÊN 2 MÁY VẬT LÝ</text>
-  <text x="740" y="48" fill="#475569" font-size="11" text-anchor="middle">Giải pháp: Đặt vé tại Máy 1 xoá cache Redis Master -&gt; Lan truyền stream qua VPN xoá ngay cache Máy 2 trong &lt; 5ms</text>
+  <text x="740" y="48" fill="#475569" font-size="11" text-anchor="middle">Giải pháp: Đặt vé tại Máy 1 xoá cache Redis Master -&gt; Lan truyền stream qua mạng LAN xoá ngay cache Máy 2 trong &lt; 5ms</text>
 
   <!-- Main Container -->
   <rect x="20" y="75" width="1440" height="725" fill="#ffffff" stroke="#1e293b" stroke-width="1.8" />
   <rect x="20" y="75" width="1440" height="30" fill="#1e293b" />
-  <text x="35" y="95" fill="#ffffff" font-size="12" font-weight="bold">QUY TRÌNH ĐỒNG BỘ BỘ NHỚ ĐỆM QUA MẠNG RIÊNG ẢO WIREGUARD VPN</text>
+  <text x="35" y="95" fill="#ffffff" font-size="12" font-weight="bold">QUY TRÌNH ĐỒNG BỘ BỘ NHỚ ĐỆM QUA MẠNG LAN NỘI BỘ</text>
 
   <!-- Step 1: Booking on Node 1 -->
   <rect x="40" y="125" width="440" height="280" fill="#ffffff" stroke="#334155" stroke-width="1.5" />
@@ -560,15 +559,15 @@ svg_05 = """
   <text x="260" y="142" fill="#ffffff" font-size="11.5" font-weight="bold" text-anchor="middle">BƯỚC 1: ĐẶT VÉ TẠI MÁY VẬT LÝ 1</text>
 
   <text x="60" y="175" fill="#0f172a" font-size="11.5" font-weight="bold">1. Khách hàng gửi POST /booking (Ghế A20):</text>
-  <text x="75" y="195" fill="#475569" font-size="11">• Giữ chỗ thành công trên Postgres Master (10.0.0.1:5501).</text>
+  <text x="75" y="195" fill="#475569" font-size="11">• Giữ chỗ thành công trên Postgres Master (192.168.43.11:5501).</text>
   <text x="75" y="215" fill="#475569" font-size="11">• Commit transaction -&gt; Ghế A20 chuyển thành 'booked'.</text>
 
   <text x="60" y="245" fill="#0f172a" font-size="11.5" font-weight="bold">2. inventory-service kích hoạt lệnh xoá cache:</text>
   <text x="75" y="265" fill="#0f172a" font-size="11" font-family="monospace">await this.redisWrite.del('seats:1');</text>
-  <text x="75" y="285" fill="#166534" font-size="11">• Lệnh DEL được gửi trực tiếp tới Redis Master (10.0.0.1:6379).</text>
+  <text x="75" y="285" fill="#166534" font-size="11">• Lệnh DEL được gửi trực tiếp tới Redis Master (192.168.43.11:6379).</text>
 
   <rect x="60" y="305" width="400" height="85" fill="#ffffff" stroke="#1e40af" stroke-width="1.5" />
-  <text x="260" y="328" fill="#1e40af" font-size="12" font-weight="bold" text-anchor="middle">REDIS MASTER (10.0.0.1:6379)</text>
+  <text x="260" y="328" fill="#1e40af" font-size="12" font-weight="bold" text-anchor="middle">REDIS MASTER (192.168.43.11:6379)</text>
   <text x="260" y="348" fill="#0f172a" font-size="11" text-anchor="middle">Xoá ngay key 'seats:1' tại RAM Máy 1</text>
   <text x="260" y="368" fill="#475569" font-size="10.5" text-anchor="middle">Đẩy lệnh DEL vào Replication Buffer Stream</text>
 
@@ -583,12 +582,12 @@ svg_05 = """
   <rect x="680" y="125" width="440" height="25" fill="#334155" />
   <text x="900" y="142" fill="#ffffff" font-size="11.5" font-weight="bold" text-anchor="middle">BƯỚC 2: ĐỒNG BỘ XOÁ CACHE SANG MÁY VẬT LÝ 2</text>
 
-  <text x="700" y="175" fill="#0f172a" font-size="11.5" font-weight="bold">3. Redis Replica trên Máy 2 (10.0.0.2:6379):</text>
-  <text x="715" y="195" fill="#475569" font-size="11">• Cấu hình: replicaof 10.0.0.1 6379 (Chế độ đọc - Read Only).</text>
-  <text x="715" y="215" fill="#475569" font-size="11">• Nhận gói tin DEL 'seats:1' từ WireGuard VPN trong &lt; 3ms.</text>
+  <text x="700" y="175" fill="#0f172a" font-size="11.5" font-weight="bold">3. Redis Replica trên Máy 2 (192.168.43.12:6379):</text>
+  <text x="715" y="195" fill="#475569" font-size="11">• Cấu hình: replicaof 192.168.43.11 6379 (Chế độ đọc - Read Only).</text>
+  <text x="715" y="215" fill="#475569" font-size="11">• Nhận gói tin DEL 'seats:1' từ mạng LAN trong &lt; 3ms.</text>
 
   <rect x="700" y="235" width="400" height="85" fill="#ffffff" stroke="#334155" stroke-width="1.5" />
-  <text x="900" y="258" fill="#0f172a" font-size="12" font-weight="bold" text-anchor="middle">REDIS REPLICA (10.0.0.2:6379)</text>
+  <text x="900" y="258" fill="#0f172a" font-size="12" font-weight="bold" text-anchor="middle">REDIS REPLICA (192.168.43.12:6379)</text>
   <text x="900" y="280" fill="#991b1b" font-size="11.5" font-weight="bold" text-anchor="middle">TỰ ĐỘNG XOÁ KEY 'seats:1' TẠI RAM MÁY 2</text>
   <text x="900" y="300" fill="#475569" font-size="10.5" text-anchor="middle">Độ trễ đồng bộ (Replication Lag): ~2-5 mili-giây</text>
 
@@ -625,7 +624,7 @@ svg_05 = """
   <text x="75" y="525" fill="#475569" font-size="11">• Mô hình Master-Replica giải quyết đúng và trúng: Ghi tập trung tại Master, Đọc phân tán tại Replica local.</text>
 
   <text x="60" y="555" fill="#0f172a" font-size="11.5" font-weight="bold">2. Độ trễ sao chép (Replication Lag):</text>
-  <text x="75" y="575" fill="#475569" font-size="11">• Qua đường truyền WireGuard VPN, gói tin DEL chỉ mất 2-5 mili-giây để đến được Redis Replica.</text>
+  <text x="75" y="575" fill="#475569" font-size="11">• Qua đường truyền mạng LAN, gói tin DEL chỉ mất 2-5 mili-giây để đến được Redis Replica.</text>
   <text x="75" y="595" fill="#475569" font-size="11">• Kể cả khi có độ trễ: Nếu khách nhanh tay bấm mua lại ghế A20 trên Máy 2 trong khoảng 2ms đó, tầng Database Transaction bên dưới với SELECT FOR UPDATE hoặc Version Check vẫn sẽ CHẶN ĐỨNG request (trả về 409 Conflict).</text>
 
   <text x="60" y="625" fill="#166534" font-size="11.5" font-weight="bold">-&gt; Hệ thống đạt mô hình Eventual Consistency đa tầng, đảm bảo tính đúng đắn 100% trong mọi kịch bản cạnh tranh!</text>
@@ -696,7 +695,7 @@ svg_06 = """
   <text x="350" y="405" fill="#0f172a" font-size="12" font-weight="bold" text-anchor="middle">CỤM RABBITMQ CLUSTER ĐỒNG THUẬN (RAFT CONSENSUS)</text>
 
   <rect x="60" y="425" width="260" height="120" fill="#ffffff" stroke="#475569" />
-  <text x="190" y="450" fill="#0f172a" font-size="11.5" font-weight="bold" text-anchor="middle">RabbitMQ #1 (Máy 1: 10.0.0.1)</text>
+  <text x="190" y="450" fill="#0f172a" font-size="11.5" font-weight="bold" text-anchor="middle">RabbitMQ #1 (Máy 1: 192.168.43.11)</text>
   <text x="190" y="470" fill="#475569" font-size="10.5" text-anchor="middle">Queue Leader: 'booking.confirmed'</text>
   <text x="190" y="490" fill="#475569" font-size="10" text-anchor="middle">Ghi log tin nhắn bền vững xuống đĩa</text>
   <text x="190" y="510" fill="#166534" font-size="10" font-weight="bold" text-anchor="middle">Raft State: Replicated (Term 1)</text>
@@ -704,9 +703,9 @@ svg_06 = """
   <line x1="320" y1="485" x2="380" y2="485" stroke="#1e293b" stroke-width="2" stroke-dasharray="4,3" />
 
   <rect x="380" y="425" width="260" height="120" fill="#ffffff" stroke="#475569" />
-  <text x="510" y="450" fill="#0f172a" font-size="11.5" font-weight="bold" text-anchor="middle">RabbitMQ #2 (Máy 2: 10.0.0.2)</text>
+  <text x="510" y="450" fill="#0f172a" font-size="11.5" font-weight="bold" text-anchor="middle">RabbitMQ #2 (Máy 2: 192.168.43.12)</text>
   <text x="510" y="470" fill="#475569" font-size="10.5" text-anchor="middle">Queue Follower: 'booking.confirmed'</text>
-  <text x="510" y="490" fill="#475569" font-size="10" text-anchor="middle">Đồng thuận tin nhắn qua WireGuard</text>
+  <text x="510" y="490" fill="#475569" font-size="10" text-anchor="middle">Đồng thuận tin nhắn qua mạng LAN</text>
   <text x="510" y="510" fill="#166534" font-size="10" font-weight="bold" text-anchor="middle">Raft State: Replicated (Term 1)</text>
 
   <rect x="60" y="560" width="580" height="35" fill="#ffffff" stroke="#94a3b8" />
@@ -853,14 +852,14 @@ svg_07 = """
 diagrams_data = [
     {
         "id": "01_tong_the_he_thong_phan_tan",
-        "title": "SƠ ĐỒ 1: KIẾN TRÚC TỔNG THỂ TOÀN BỘ HỆ THỐNG PHÂN TÁN (2 MÁY VẬT LÝ + WITNESS + WIREGUARD VPN)",
-        "subtitle": "Mô hình Active-Standby kết nối qua WireGuard VPN (10.0.0.0/24), đồng bộ dữ liệu thời gian thực và tự động cân bằng tải",
+        "title": "SƠ ĐỒ 1: KIẾN TRÚC TỔNG THỂ TOÀN BỘ HỆ THỐNG PHÂN TÁN (2 MÁY VẬT LÝ + NODE 3 TRỌNG TÀI, CÙNG MẠNG LAN)",
+        "subtitle": "Mô hình Active-Standby kết nối qua mạng LAN (192.168.43.0/24), đồng bộ dữ liệu thời gian thực và tự động cân bằng tải",
         "svg": svg_01
     },
     {
         "id": "02_auto_failover_khi_db_master_sap",
         "title": "SƠ ĐỒ 2: LUỒNG AUTO-FAILOVER KHI MASTER CHẾT & CƠ CHẾ QUORUM CHỐNG NÃO CHIA CẮT (SPLIT-BRAIN)",
-        "subtitle": "Quy trình bỏ phiếu Quorum 3 nodes: Phân biệt chính xác giữa đứt mạng VPN (không promote) và máy chủ sập thật sự (tự động thăng cấp < 20s)",
+        "subtitle": "Quy trình bỏ phiếu Quorum 3 nodes: Phân biệt chính xác giữa đứt mạng (không promote) và máy chủ sập thật sự (tự động thăng cấp < 20s)",
         "svg": svg_02
     },
     {
@@ -878,7 +877,7 @@ diagrams_data = [
     {
         "id": "05_dong_bo_cache_chong_ban_ve_ma",
         "title": "SƠ ĐỒ 5: LUỒNG ĐỒNG BỘ XOÁ CACHE GIỮA 2 MÁY THẬT (CHỐNG BÁN VÉ MA - GHOST BOOKING)",
-        "subtitle": "Ghi vé tại Máy 1 -> Xoá cache Redis Master -> Stream replication qua WireGuard VPN tự động xoá cache Redis Replica trên Máy 2 trong < 5ms",
+        "subtitle": "Ghi vé tại Máy 1 -> Xoá cache Redis Master -> Stream replication qua mạng LAN tự động xoá cache Redis Replica trên Máy 2 trong < 5ms",
         "svg": svg_05
     },
     {
@@ -895,7 +894,7 @@ diagrams_data = [
     }
 ]
 
-print("=== BẮT ĐẦU TẠO 7 BẢN VẼ KỸ THUẬT VÀ XUẤT ẢNH PNG VÀO c:\\phantan\\diagrams ===")
+print("=== BẮT ĐẦU TẠO 7 BẢN VẼ KỸ THUẬT VÀ XUẤT ẢNH PNG VÀO {OUTPUT_IMAGE_DIR} ===")
 
 count = 0
 for d in diagrams_data:

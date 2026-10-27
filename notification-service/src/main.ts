@@ -10,11 +10,13 @@ async function bootstrap() {
   const app = await NestFactory.createMicroservice<MicroserviceOptions>(NotificationModule, {
     transport: Transport.RMQ,
     options: {
-      urls: [rmqUrl],
+      urls: rmqUrl.split(','), // nút tại chỗ trước, nút máy khác để dự phòng
       queue: 'booking.confirmed',
       noAck: false, // Manual ACK ensures message durability when worker fails
       queueOptions: {
         durable: true,
+        // Phải khai báo giống hệt bên booking-service (quorum queue, nhân bản Raft trên 3 nút)
+        arguments: { 'x-queue-type': 'quorum' },
       },
     },
   });

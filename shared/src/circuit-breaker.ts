@@ -26,7 +26,7 @@ export class CircuitBreaker {
     this.successThreshold = successThreshold;
   }
 
-  async execute<T>(fn: () => Promise<T>, fallback?: () => T | Promise<T>): Promise<T> {
+  async execute<T, F = T>(fn: () => Promise<T>, fallback?: () => F | Promise<F>): Promise<T | F> {
     if (this.state === CircuitState.OPEN) {
       if (Date.now() - this.lastFailureTime >= this.recoveryTimeout) {
         this.state = CircuitState.HALF_OPEN;
@@ -45,8 +45,13 @@ export class CircuitBreaker {
       this.onSuccess();
       return result;
     } catch (error) {
+      // Lỗi nghiệp vụ (4xx: ghế đã bán, dữ liệu sai...) không phải dấu hiệu dịch vụ hỏng -> không đếm
+      if (!CircuitBreaker.isInfrastructureError(error)) {
+        this.onSuccess();
+        throw error;
+      }
       this.onFailure();
-      if (fallback && this.state === CircuitState.OPEN) return fallback();
+      if (fallback && this.getState() === CircuitState.OPEN) return fallback();
       throw error;
     }
   }
@@ -62,10 +67,15 @@ export class CircuitBreaker {
     }
   }
 
+  private static isInfrastructureError(error: any): boolean {
+    const httpStatus = typeof error?.getStatus === 'function' ? error.getStatus() : undefined;
+    return httpStatus === undefined || httpStatus >= 500;
+  }
+
   private onFailure() {
     this.failureCount++;
     this.lastFailureTime = Date.now();
-    if (this.failureCount >= this.failureThreshold) {
+    if (this.state === CircuitState.HALF_OPEN || this.failureCount >= this.failureThreshold) {
       this.state = CircuitState.OPEN;
       console.error(`[CB:${this.name}] -> OPEN (${this.failureCount} lỗi liên tiếp)`);
     }

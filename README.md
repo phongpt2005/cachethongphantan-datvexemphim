@@ -88,79 +88,73 @@ graph TD
 
 ---
 
-## 🚀 3. Hướng Dẫn Khởi Chạy Nhanh (Chỉ Với 1 Lệnh)
+## 🚀 3. Triển Khai Trên 3 Máy (2 máy vật lý + Node 3 trọng tài, cùng Wi-Fi)
 
-### Yêu cầu tiên quyết:
-- Đã cài đặt **Docker** và **Docker Compose**.
-- Đã cài đặt **Node.js** (v18 trở lên) để chạy kịch bản demo concurrency.
+Yêu cầu: Docker Desktop + Node.js ≥ 18 trên cả 3 máy. Hướng dẫn chi tiết (firewall, hotspot, phân vai, xử lý sự cố) ở [`DEMO-GUIDE.md`](DEMO-GUIDE.md). Sơ đồ: [`diagrams/01_tong_the_he_thong_phan_tan.png`](diagrams/01_tong_the_he_thong_phan_tan.png).
 
-### Khởi động toàn bộ cụm hệ thống:
 ```bash
-docker compose up -d --build
+node deploy/cluster.mjs ip                                     # xem IP Wi-Fi của máy này
+node deploy/cluster.mjs init <IP_MAY_1> <IP_MAY_2> <IP_NODE_3>  # chạy trên CẢ 3 máy, cùng giá trị
+node deploy/cluster.mjs up 1                                   # MÁY 1: Primary + Redis Master + RabbitMQ #1
+node deploy/cluster.mjs up 3                                   # NODE 3: Witness ×2 + RabbitMQ #3 + Frontend LB
+node deploy/cluster.mjs up 2                                   # MÁY 2: Standby + Redis Replica + RabbitMQ #2
+node deploy/cluster.mjs status                                 # ai đang là Primary, quorum mấy/3
+node deploy/cluster.mjs failback                               # (máy 1) đưa Primary về máy 1 sau demo failover
+node demo/00-preflight.mjs                                     # kiểm tra toàn cụm
 ```
 
-### Kiểm tra trạng thái các container:
-```bash
-docker compose ps
-```
-Hệ thống sẵn sàng khi các cổng sau mở:
-- `api-gateway`: `http://localhost:3000`
-- `inventory-service` (Health): `http://localhost:3002/health`
-- `booking-service` (Health): `http://localhost:3001/health`
-- `Nginx Load Balancer`: `http://localhost:8080/health` (gRPC :50051)
-- `RabbitMQ Management`: `http://localhost:15672` (User/Pass: `guest` / `guest`)
-- `PostgreSQL Inventory`: `localhost:5432` (DB: `inventory_db`)
-- `PostgreSQL Booking`: `localhost:5433` (DB: `booking_db`)
+Chỉ có 1 laptop để tập dượt: `node deploy/cluster.mjs init --rehearsal` rồi `node deploy/cluster.mjs up all`.
+
+| Thư mục | Nội dung |
+| :--- | :--- |
+| `deploy/node1`, `node2`, `node3` | Docker Compose cho từng máy (+ `lan.yml` khi chạy thật, `rehearsal.yml` khi tập dượt 1 máy) |
+| `db-cluster/` | Image PostgreSQL 15 + repmgr: tự clone Standby, bỏ phiếu đồng thuận, tự failover, Primary cũ tự hạ cấp + `pg_rewind` |
+| `deploy/pg-router/` | Định tuyến ghi tới Primary hiện tại; mất quorum (< 2/3) thì tự chặn ghi. `GET :8008/status` |
+| `deploy/rabbitmq/` | Cấu hình cụm RabbitMQ 3 nút, quorum queue luôn đủ 3 bản sao |
+| `deploy/windows/open-firewall.ps1` | Mở cổng LAN trên Windows Firewall cho từng máy |
+
+| Địa chỉ | Máy 1 | Máy 2 | Node 3 |
+| :--- | :--- | :--- | :--- |
+| Frontend LB (client) + Demo Console | — | — | `:8090` |
+| API Gateway | `:3000` | `:3100` | — |
+| PostgreSQL inventory / booking | `:5501` / `:5502` | `:5511` / `:5512` | witness `:5503` / `:5504` |
+| pg-router status | `:8008/status` | `:8018/status` | — |
+| RabbitMQ UI (guest/guest) | `:15674` | `:15684` | `:15694` |
+
+Chạy nhanh trên 1 máy (phát triển, không có replication): `docker compose up -d --build` → `http://localhost:3000`.
 
 ---
 
-## 🎬 4. Hướng Dẫn Thực Hiện 5 Kịch Bản Demo
+## 🎬 4. Bộ Demo Đặc Trưng Hệ Phân Tán
 
-Tất cả các kịch bản demo đã được tự động hoá trong thư mục `/demo`:
-
-### 📌 Kịch bản 1: Kiểm chứng Transparency (Tính trong suốt)
 ```bash
-./demo/demo-transparency.sh
+node demo/run.mjs            # menu chọn kịch bản (chạy trên Node 3)
+node demo/run.mjs 5          # chạy thẳng kịch bản 5
+node demo/run.mjs all --auto # chạy toàn bộ để tập dượt
 ```
-> Client chỉ gửi 1 lệnh curl tới Gateway, nhận về thông tin vé đầy đủ từ nhiều service phân tán.
 
-### 📌 Kịch bản 2: Kiểm chứng Concurrency Control (Chống bán trùng ghế)
-```bash
-node demo/demo-concurrency.js
-```
-> Bắn đồng thời 10 requests qua `Promise.all()` vào ghế cuối cùng `A20`.  
-> **Kết quả:** Đúng 1 request thành công (`201 Created`), 9 request bị từ chối (`409 Conflict`).  
-> 
-> *Muốn chuyển đổi cơ chế khoá sang **Optimistic Locking**:*
-> ```bash
-> LOCK_STRATEGY=optimistic docker compose up -d inventory-service
-> node demo/demo-concurrency.js
-> ```
+| # | Kịch bản | Đặc trưng |
+| :---: | :--- | :--- |
+| 01 | Một địa chỉ duy nhất — 2 máy vật lý phía sau | Transparency |
+| 02 | 10 khách ở 2 máy giành ghế cuối A20 (pessimistic / optimistic) | Concurrency control |
+| 03 | Dịch vụ email & một nút RabbitMQ chết — máy 2 tiếp quản, không mất email | Fault tolerance + Async (Raft) |
+| 04 | Đứt mạng máy 1 ↔ máy 2 — Node 3 phủ quyết, không sinh 2 Primary | Chống split-brain |
+| 05 | Primary máy 1 sập — máy 2 tự thăng cấp, máy 1 quay lại tự về Standby | Auto-failover + fencing |
+| 06 | Bán ở máy 1 — máy 2 thấy "đã bán" sau vài ms | Replication / chống vé ma |
+| 07 | Đo độ lệch đồng hồ 2 máy bằng thuật toán Cristian | No global clock |
+| 08 | Nhân bản booking-service ×3 + cache-aside (bổ sung) | Scalability |
+| 09 | Dịch vụ kho ghế chết — circuit breaker ngắt mạch (bổ sung) | Fault tolerance |
+| 10 | Tắt Wi-Fi máy 1 — máy 1 tự chặn ghi, máy 2 lên thay, nối lại tự về Standby | Partition + self-fencing |
 
-### 📌 Kịch bản 3: Kiểm chứng Scalability (Scale-out & Nginx Load Balancing)
-```bash
-./demo/demo-scale.sh
-```
-> Tự động scale `booking-service` thành 3 container, bắn 30 request liên tiếp và thống kê số lượng request được san đều qua từng hostname/container ID.
+**Demo Console** `http://<IP Node 3>:8090/`: sơ đồ ghế + 10 khách tranh A20; tab *Trạng thái cụm* hiển thị trực tiếp Primary/Standby/Witness.
 
-### 📌 Kịch bản 4: Kiểm chứng Fault Tolerance & Asynchronous Decoupling
-```bash
-./demo/demo-fault-tolerance.sh
-```
-> Tắt `notification-service`, đặt vé vẫn thành công (HTTP 201). Sau đó bật lại service và chứng kiến message trong RabbitMQ Durable Queue được xử lý bù ngay lập tức!
-
-### 📌 Kịch bản 5: Kiểm chứng No Global Clock (Không có đồng hồ toàn cục)
-```bash
-./demo/demo-no-global-clock.sh
-```
-> Trích xuất và so sánh log timestamp của các service, giải thích hiện tượng trễ thời gian vật lý và vì sao phải dùng database transactions thay vì timestamp máy tính.
+Demo bổ trợ lý thuyết Chương 3 (luồng, container): `demo/extra-chuong3/`, chạy với `docker-compose.yml` gốc.
 
 ---
 
-## 📖 5. Kịch Bản Thuyết Trình Bảo Vệ Chi Tiết
+## 📖 5. Hướng Dẫn Demo Chi Tiết
 
-Xem hướng dẫn thuyết trình từng bước kèm lời thoại mẫu dành cho sinh viên tại file:  
-👉 [`DEMO-SCRIPT.md`](file:///home/luan/Desktop/demoCacHeThongPhanTan/DEMO-SCRIPT.md)
+Kịch bản thuyết trình từng bước (phân vai, câu chốt, số liệu đo thật, xử lý sự cố, câu hỏi hội đồng): 👉 [`DEMO-GUIDE.md`](DEMO-GUIDE.md)
 
 ---
 
@@ -168,9 +162,13 @@ Xem hướng dẫn thuyết trình từng bước kèm lời thoại mẫu dành
 
 | Method | Endpoint | Mô tả | Trạng thái phản hồi |
 | :--- | :--- | :--- | :--- |
-| `GET` | `/health` | Kiểm tra trạng thái hệ thống | 200 OK |
+| `GET` | `/health` | Kiểm tra trạng thái gateway (kèm `nodeId`) | 200 OK |
 | `GET` | `/movies/:showtimeId` | Xem thông tin suất chiếu và danh sách 20 ghế | 200 OK |
 | `POST` | `/booking` | Đặt vé xem phim (Body: `{ showtimeId, seatId, userName }`) | 201 Created / 409 Conflict |
 | `GET` | `/booking/:id` | Tra cứu chi tiết vé theo ID | 200 OK / 404 Not Found |
 | `POST` | `/dev/reset` | Đưa trạng thái ghế A20 về trống để demo lại | 200 OK |
+| `GET` | `/health/deep` | Trạng thái circuit breaker của gateway | 200 OK |
+| `GET` | `/lab/cluster` | Ảnh chụp máy này: Primary/Standby, repmgr, Redis, hàng đợi, circuit, bản sao booking | 200 OK |
+| `POST` | `/lab/lock-strategy?mode=optimistic` | Đổi chiến lược khoá của inventory-service lúc đang chạy | 200 OK |
+| `GET` | `/lab/runtime`, `/lab/block`, `/lab/offload`, `/lab/slow` | Phục vụ demo bổ trợ Chương 3 (luồng, container) | 200 OK |
 # cachethongphantan-datvexemphim

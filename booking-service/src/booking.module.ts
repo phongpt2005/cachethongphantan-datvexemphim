@@ -46,10 +46,13 @@ if (!protoPath) {
         name: 'RABBITMQ_CLIENT',
         transport: Transport.RMQ,
         options: {
-          urls: [process.env.RABBITMQ_URL || 'amqp://guest:guest@rabbitmq:5672'],
+          // Danh sách nút RabbitMQ (cách nhau dấu phẩy): nút tại chỗ trước, nút máy khác để dự phòng
+          urls: (process.env.RABBITMQ_URL || 'amqp://guest:guest@rabbitmq:5672').split(','),
           queue: 'booking.confirmed',
           queueOptions: {
             durable: true,
+            // Quorum queue: nhân bản bằng Raft trên 3 nút RabbitMQ, chết 1 nút vẫn nhận/giao tin
+            arguments: { 'x-queue-type': 'quorum' },
           },
         },
       },

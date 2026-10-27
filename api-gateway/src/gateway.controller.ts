@@ -18,7 +18,7 @@ export class GatewayController {
       nodeId: this.nodeId,
       hostname: this.hostname,
       timestamp: new Date().toISOString(),
-      architecture: 'Distributed Microservices Multi-Node (gRPC + RabbitMQ Quorum + Redis Cache-Aside + PostgreSQL HA)',
+      architecture: 'Microservices: REST Gateway + gRPC + RabbitMQ + Redis cache-aside + PostgreSQL (database-per-service)',
     };
   }
 

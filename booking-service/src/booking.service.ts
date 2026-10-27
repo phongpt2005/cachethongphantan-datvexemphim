@@ -2,7 +2,7 @@ import { Injectable, OnModuleInit, Inject, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ClientGrpc, ClientProxy, RpcException } from '@nestjs/microservices';
-import { firstValueFrom, Observable } from 'rxjs';
+import { firstValueFrom, Observable, timeout } from 'rxjs';
 import { v4 as uuidv4 } from 'uuid';
 import * as os from 'os';
 import { Booking } from './entities/booking.entity';
@@ -34,15 +34,17 @@ export class BookingService implements OnModuleInit {
   }
 
   async createBooking(showtimeId: string, seatId: string, userName: string) {
+    console.log(`[BOOKING-SERVICE] [HOST: ${this.hostname}] [TIME: ${new Date().toISOString()}] Received booking request user=${userName} seat=${seatId}`);
     // 1. Gọi Inventory gRPC để giữ chỗ ghế
     let reserveRes: any;
     try {
       reserveRes = await firstValueFrom(
-        this.inventoryGrpc.reserveSeat({ seatId, showtimeId, userName }),
+        this.inventoryGrpc.reserveSeat({ seatId, showtimeId, userName }).pipe(timeout(2500)),
       );
     } catch (err) {
       throw new RpcException({
-        code: err.code || 2,
+        // Hết hạn chót -> DEADLINE_EXCEEDED (4) để gateway trả 504 và circuit breaker ghi nhận lỗi
+        code: err.name === 'TimeoutError' ? 4 : err.code || 2,
         message: err.message || err.details || 'Failed to reserve seat in inventory',
       });
     }
@@ -73,6 +75,7 @@ export class BookingService implements OnModuleInit {
 
     try {
       this.rabbitClient.emit('booking.confirmed', eventPayload);
+      console.log(`[BOOKING-SERVICE] [HOST: ${this.hostname}] [TIME: ${new Date().toISOString()}] Published event booking.confirmed user=${userName} booking=${booking.id}`);
     } catch (err) {
       console.error(`RabbitMQ publish error: ${err.message}`);
     }

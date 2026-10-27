@@ -1,0 +1,8 @@
+# Chạy thật trên 3 máy cùng Wi-Fi: các nút RabbitMQ tìm nhau qua IP LAN
+# (epmd 4369 + cổng phân tán Erlang 25672 phải mở trên mọi máy)
+services:
+  rabbitmq:
+    ports: ["4369:4369", "25672:25672"]
+    extra_hosts:
+      - "rabbit-node2:${NODE2_IP}"
+      - "rabbit-node3:${NODE3_IP}"

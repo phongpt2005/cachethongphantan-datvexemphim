@@ -4,6 +4,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { GatewayController } from './gateway.controller';
 import { GatewayService } from './gateway.service';
+import { LabController } from './lab.controller';
 
 function resolveProto(fileName: string): string {
   const candidatePaths = [
@@ -42,7 +43,7 @@ const bookingProtoPath = process.env.BOOKING_PROTO_PATH || resolveProto('booking
       },
     ]),
   ],
-  controllers: [GatewayController],
+  controllers: [GatewayController, LabController],
   providers: [GatewayService],
 })
 export class GatewayModule {}

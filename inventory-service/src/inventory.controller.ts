@@ -1,6 +1,8 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, Post, Query } from '@nestjs/common';
 import { GrpcMethod } from '@nestjs/microservices';
+import { asUnavailable } from './common/db-unavailable';
 import { InventoryService } from './inventory.service';
+import { getRuntimeInfo } from './common/runtime-info';
 
 @Controller()
 export class InventoryController {
@@ -11,9 +13,27 @@ export class InventoryController {
     return {
       status: 'ok',
       service: 'inventory-service',
-      lockStrategy: process.env.LOCK_STRATEGY || 'pessimistic',
+      nodeId: process.env.NODE_ID || 'node1',
+      lockStrategy: this.inventoryService.getLockStrategy(),
       timestamp: new Date().toISOString(),
     };
+  }
+
+  // Demo Chương 3: luồng nhân, namespace, cgroups của container này
+  @Get('lab/runtime')
+  getRuntime() {
+    return getRuntimeInfo('inventory-service');
+  }
+
+  // Demo hệ phân tán: vai trò Primary/Standby, Redis Master/Replica, thống kê cache
+  @Get('lab/cluster')
+  async getCluster() {
+    return this.inventoryService.getClusterInfo();
+  }
+
+  @Post('lab/lock-strategy')
+  setLockStrategy(@Query('mode') mode: string) {
+    return this.inventoryService.setLockStrategy(mode);
   }
 
   @GrpcMethod('InventoryService', 'GetShowtime')
@@ -28,11 +48,11 @@ export class InventoryController {
 
   @GrpcMethod('InventoryService', 'ReserveSeat')
   async reserveSeat(data: { seatId: string; showtimeId: string; userName: string }) {
-    return this.inventoryService.reserveSeat(data.seatId, data.showtimeId, data.userName);
+    return this.inventoryService.reserveSeat(data.seatId, data.showtimeId, data.userName).catch((e) => { throw asUnavailable(e); });
   }
 
   @GrpcMethod('InventoryService', 'ResetData')
   async resetData() {
-    return this.inventoryService.resetData();
+    return this.inventoryService.resetData().catch((e) => { throw asUnavailable(e); });
   }
 }

@@ -17,6 +17,11 @@ export class InventoryService implements OnModuleInit {
   private redisWrite: Redis | null = null;
   private redisRead: Redis | null = null;
 
+  // Bộ đếm phục vụ demo: cache-aside hit/miss, số lần đọc ở Standby, số lần ghi ở Primary
+  private readonly stats = { cacheHits: 0, cacheMisses: 0, replicaReads: 0, primaryWrites: 0 };
+  // Ping Redis Master mỗi giây: máy chứa Master tắt nguồn thì TCP không báo đứt ngay
+  private redisMasterAlive = false;
+
   constructor(
     @InjectRepository(Showtime)
     private readonly showtimeRepo: Repository<Showtime>,
@@ -29,22 +34,36 @@ export class InventoryService implements OnModuleInit {
     private readonly showtimeReadRepo: Repository<Showtime>,
     @InjectRepository(Seat, 'replica')
     private readonly seatReadRepo: Repository<Seat>,
+    @InjectDataSource('replica')
+    private readonly replicaDataSource: DataSource,
   ) {}
 
-  private getLockStrategy(): 'pessimistic' | 'optimistic' {
-    const strategy = (process.env.LOCK_STRATEGY || 'pessimistic').toLowerCase();
-    return strategy === 'optimistic' ? 'optimistic' : 'pessimistic';
+  // Khởi tạo từ biến môi trường, có thể đổi lúc chạy qua POST /lab/lock-strategy (phục vụ demo)
+  private lockStrategy: 'pessimistic' | 'optimistic' =
+    (process.env.LOCK_STRATEGY || 'pessimistic').toLowerCase() === 'optimistic' ? 'optimistic' : 'pessimistic';
+
+  getLockStrategy(): 'pessimistic' | 'optimistic' {
+    return this.lockStrategy;
+  }
+
+  setLockStrategy(mode: string) {
+    this.lockStrategy = mode === 'optimistic' ? 'optimistic' : 'pessimistic';
+    console.log(`[INVENTORY] [${this.nodeId}] LOCK_STRATEGY -> ${this.lockStrategy.toUpperCase()}`);
+    return { nodeId: this.nodeId, lockStrategy: this.lockStrategy };
   }
 
   async onModuleInit() {
-    const masterRedisHost = process.env.REDIS_MASTER_HOST || '10.0.0.1';
-    const localRedisHost = process.env.REDIS_LOCAL_HOST || 'localhost';
+    const masterRedisHost = process.env.REDIS_MASTER_HOST || 'redis';
+    const masterRedisPort = Number(process.env.REDIS_MASTER_PORT || 6379);
+    const localRedisHost = process.env.REDIS_LOCAL_HOST || masterRedisHost;
+    const localRedisPort = Number(process.env.REDIS_LOCAL_PORT || masterRedisPort);
 
     try {
       this.redisWrite = new Redis({
         host: masterRedisHost,
-        port: 6379,
+        port: masterRedisPort,
         lazyConnect: true,
+        commandTimeout: 800, // Redis Master ở máy khác chết -> bỏ qua cache thay vì treo
         maxRetriesPerRequest: 1,
         retryStrategy: (times) => Math.min(times * 100, 3000),
       });
@@ -57,8 +76,9 @@ export class InventoryService implements OnModuleInit {
     try {
       this.redisRead = new Redis({
         host: localRedisHost,
-        port: 6379,
+        port: localRedisPort,
         lazyConnect: true,
+        commandTimeout: 800,
         maxRetriesPerRequest: 1,
         retryStrategy: (times) => Math.min(times * 100, 3000),
       });
@@ -68,8 +88,20 @@ export class InventoryService implements OnModuleInit {
       await this.redisRead.connect().catch(() => {});
     } catch (e) {}
 
+    setInterval(() => {
+      const wasAlive = this.redisMasterAlive;
+      (this.redisWrite ? this.redisWrite.ping() : Promise.reject())
+        .then(() => { this.redisMasterAlive = true; })
+        .catch(() => { this.redisMasterAlive = false; })
+        .finally(() => {
+          if (wasAlive !== this.redisMasterAlive) {
+            console.log(`[INVENTORY] [${this.nodeId}] Redis Master ${this.redisMasterAlive ? 'OK -> dùng lại cache' : 'MẤT LIÊN LẠC -> bỏ qua cache, đọc thẳng CSDL'}`);
+          }
+        });
+    }, 1000).unref();
+
     console.log(`[INVENTORY] [${this.nodeId}] Current LOCK_STRATEGY = ${this.getLockStrategy().toUpperCase()}`);
-    console.log(`[INVENTORY] [${this.nodeId}] Redis connected: Write->${masterRedisHost}:6379, Read->${localRedisHost}:6379`);
+    console.log(`[INVENTORY] [${this.nodeId}] Redis connected: Write->${masterRedisHost}:${masterRedisPort}, Read->${localRedisHost}:${localRedisPort}`);
     await this.seedData();
   }
 
@@ -134,13 +166,21 @@ export class InventoryService implements OnModuleInit {
 
   async listSeats(showtimeId: string) {
     const cacheKey = `seats:${showtimeId}`;
-    if (this.redisRead) {
+    // Mất liên lạc với Redis Master thì lệnh xoá cache (DEL) không còn tới được bản sao:
+    // không tin cache nữa, đọc thẳng CSDL để tránh "vé ma" trong lúc failover
+    const masterReachable = this.redisMasterAlive;
+    if (this.redisRead && masterReachable) {
       try {
         const cached = await this.redisRead.get(cacheKey);
-        if (cached) return { seats: JSON.parse(cached) };
+        if (cached) {
+          this.stats.cacheHits++;
+          return { seats: JSON.parse(cached) };
+        }
       } catch (e) {}
     }
 
+    this.stats.cacheMisses++;
+    this.stats.replicaReads++;
     const seats = await this.seatReadRepo.find({ where: { showtimeId }, order: { id: 'ASC' } });
     if (this.redisWrite) {
       try {
@@ -152,6 +192,7 @@ export class InventoryService implements OnModuleInit {
 
   async reserveSeat(seatId: string, showtimeId: string, userName: string) {
     const strategy = this.getLockStrategy();
+    console.log(`[INVENTORY-SERVICE] [HOST: ${this.hostname}] [TIME: ${new Date().toISOString()}] Reserve request user=${userName} seat=${seatId} lock=${strategy}`);
     const showtime = await this.showtimeRepo.findOne({ where: { id: showtimeId } });
     if (!showtime) {
       throw new RpcException({ code: status.NOT_FOUND, message: `Showtime ${showtimeId} not found` });
@@ -186,6 +227,7 @@ export class InventoryService implements OnModuleInit {
       seat.status = 'booked';
       await queryRunner.manager.save(seat);
       await queryRunner.commitTransaction();
+      this.stats.primaryWrites++;
 
       // Xoá cache trên Redis Master -> tự đồng bộ sang Redis Replica của cả 2 node
       if (this.redisWrite) {
@@ -240,6 +282,7 @@ export class InventoryService implements OnModuleInit {
         message: `Optimistic Lock Conflict: Seat ${seat.seatCode} was updated by a concurrent transaction (version conflict)`,
       });
     }
+    this.stats.primaryWrites++;
 
     if (this.redisWrite) {
       try {
@@ -255,6 +298,51 @@ export class InventoryService implements OnModuleInit {
       movieName: showtime.movieName,
       showtimeId: showtime.id,
       processedByHost: this.hostname,
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  // Demo: vai trò thật của từng kết nối CSDL / Redis (Primary hay Standby, Master hay Replica)
+  async getClusterInfo() {
+    const pgInfo = async (ds: DataSource) => {
+      try {
+        const [r] = await ds.query(
+          `SELECT inet_server_addr()::text AS ip, pg_is_in_recovery() AS standby,
+                  (SELECT count(*)::int FROM pg_stat_replication) AS replicas,
+                  (SELECT status FROM seats WHERE id = '20') AS a20`,
+        );
+        return { ok: true, ip: r.ip.replace(/\/32$/, ''), role: r.standby ? 'STANDBY' : 'PRIMARY', streamingReplicas: r.replicas, seatA20: r.a20 };
+      } catch (err) {
+        return { ok: false, error: err.message };
+      }
+    };
+    const redisInfo = async (client: Redis | null) => {
+      if (!client) return { ok: false, error: 'not configured' };
+      try {
+        const text = await client.info('replication');
+        const role = /role:(\w+)/.exec(text)?.[1] || 'unknown';
+        const replicas = Number(/connected_slaves:(\d+)/.exec(text)?.[1] || 0);
+        const link = /master_link_status:(\w+)/.exec(text)?.[1];
+        return { ok: true, host: client.options.host, role: role === 'slave' ? 'REPLICA' : role.toUpperCase(), replicas, link: link || null, cachedSeats: await client.exists('seats:1') === 1 };
+      } catch (err) {
+        return { ok: false, host: client.options.host, error: err.message };
+      }
+    };
+    const [write, read, redisWrite, redisRead] = await Promise.all([
+      pgInfo(this.masterDataSource),
+      pgInfo(this.replicaDataSource),
+      redisInfo(this.redisWrite),
+      redisInfo(this.redisRead),
+    ]);
+    return {
+      service: 'inventory-service',
+      nodeId: this.nodeId,
+      hostname: this.hostname,
+      lockStrategy: this.getLockStrategy(),
+      db: { write, read },
+      redis: { write: redisWrite, read: redisRead },
+      stats: this.stats,
+      cacheTrusted: this.redisMasterAlive,
       timestamp: new Date().toISOString(),
     };
   }

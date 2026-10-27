@@ -1,0 +1,10 @@
+# Tập dượt 3 "máy" trên 1 laptop: các nút RabbitMQ gặp nhau qua mạng Docker dùng chung
+services:
+  rabbitmq:
+    networks:
+      default:
+      moviebook-lan:
+        aliases: [rabbit-node2]
+networks:
+  moviebook-lan:
+    external: true

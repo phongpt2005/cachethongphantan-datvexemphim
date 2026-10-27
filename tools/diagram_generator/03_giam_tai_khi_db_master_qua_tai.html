@@ -84,9 +84,9 @@
   <text x="545" y="330" fill="#475569" font-size="10" text-anchor="middle">await redisWrite.setex('seats:1', 15, data)</text>
 
   <rect x="40" y="365" width="670" height="140" fill="#ffffff" stroke="#64748b" />
-  <text x="55" y="388" fill="#0f172a" font-size="11.5" font-weight="bold">2. Phân phối tải trên cụm Redis Master-Replica qua VPN:</text>
-  <text x="70" y="408" fill="#475569" font-size="11">• Tiến trình trên Máy 1 đọc từ Redis Master local (10.0.0.1:6379).</text>
-  <text x="70" y="426" fill="#475569" font-size="11">• Tiến trình trên Máy 2 đọc từ Redis Replica local (10.0.0.2:6379).</text>
+  <text x="55" y="388" fill="#0f172a" font-size="11.5" font-weight="bold">2. Phân phối tải trên cụm Redis Master-Replica qua mạng LAN:</text>
+  <text x="70" y="408" fill="#475569" font-size="11">• Tiến trình trên Máy 1 đọc từ Redis Master local (192.168.43.11:6379).</text>
+  <text x="70" y="426" fill="#475569" font-size="11">• Tiến trình trên Máy 2 đọc từ Redis Replica local (192.168.43.12:6379).</text>
   <text x="70" y="446" fill="#166534" font-size="11" font-weight="bold">• Khi có người đặt vé: Chỉ gửi lệnh DEL xoá cache về Redis Master.</text>
   <text x="70" y="464" fill="#0f172a" font-size="11">• Redis Master tự stream replication sang Redis Replica của Máy 2 trong &lt; 5ms.</text>
   <text x="70" y="484" fill="#0f172a" font-size="11" font-weight="bold">-&gt; Cả 2 máy đọc bộ nhớ đệm tại chỗ, không làm nghẽn đường truyền mạng WAN!</text>
@@ -112,7 +112,7 @@
   <rect x="770" y="215" width="670" height="135" fill="#ffffff" stroke="#475569" stroke-width="1.5" />
   <text x="785" y="240" fill="#0f172a" font-size="12" font-weight="bold">LUỒNG ĐỌC (READ PATH — 85% LƯU LƯỢNG):</text>
   <text x="800" y="265" fill="#0f172a" font-size="11">• listSeats(), getShowtime() sử dụng seatReadRepo và showtimeReadRepo.</text>
-  <text x="800" y="285" fill="#0f172a" font-size="11" font-weight="bold">• Điều hướng trực tiếp sang PostgreSQL Standby trên Máy 2 (10.0.0.2:5501).</text>
+  <text x="800" y="285" fill="#0f172a" font-size="11" font-weight="bold">• Điều hướng trực tiếp sang PostgreSQL Standby trên Máy 2 (192.168.43.12:5501).</text>
   <text x="800" y="305" fill="#475569" font-size="11">• Database Master tại Máy 1 hoàn toàn không phải tốn chu kỳ CPU nào để xử lý đọc.</text>
   <text x="800" y="325" fill="#166534" font-size="11" font-weight="bold">-&gt; Tận dụng tối đa tài nguyên RAM và SSD của máy chủ phụ (Node 2)!</text>
 
