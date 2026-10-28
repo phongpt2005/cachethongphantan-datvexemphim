@@ -1,0 +1,3 @@
+@echo off
+rem Runs setup.ps1 without changing ExecutionPolicy. Example: deploy\windows\setup.cmd -Node 1 -Ip1 ... -Ip2 ... -Ip3 ...
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0setup.ps1" %*

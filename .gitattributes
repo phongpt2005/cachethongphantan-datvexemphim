@@ -1,2 +1,4 @@
 *.sh text eol=lf
 db-local/pg_hba.conf text eol=lf
+*.ps1 text eol=crlf
+*.cmd text eol=crlf

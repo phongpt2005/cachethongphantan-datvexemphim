@@ -38,6 +38,20 @@
 | Firewall | PowerShell **Run as Administrator** trên từng máy (xem lệnh bên dưới) |
 | Không ngủ máy | Settings → Power → Screen/Sleep = Never khi cắm sạc |
 
+### Cách nhanh: script setup (làm hộ mục 1 + 2)
+
+Mỗi máy chạy **một lệnh** trong PowerShell thường, cùng 3 IP, chỉ khác `-Node`:
+
+```powershell
+deploy\windows\setup.cmd -Node 1 -Ip1 192.168.43.11 -Ip2 192.168.43.12 -Ip3 192.168.43.13   # máy 1
+deploy\windows\setup.cmd -Node 3 -Ip1 192.168.43.11 -Ip2 192.168.43.12 -Ip3 192.168.43.13   # Node 3
+deploy\windows\setup.cmd -Node 2 -Ip1 192.168.43.11 -Ip2 192.168.43.12 -Ip3 192.168.43.13   # máy 2
+```
+
+Script làm các bước: kiểm tra Git/Node/Docker (tự mở Docker Desktop nếu chưa chạy), ghi `cluster.env`, kiểm tra IP máy này có đúng vai không, **hỏi quyền Admin một lần (bấm YES)** để mở firewall + đặt mạng Private, kiểm tra thấy các máy kia, kiểm tra cổng bị chiếm, rồi `up` và chờ dịch vụ lên. **Ba máy chạy cùng lúc được:** Node 3 tự đợi máy 1, máy 2 tự đợi máy 1 + Node 3. Lần sau chỉ cần `setup.cmd -Node <số>` (dùng lại IP đã lưu); `-CheckOnly` chỉ kiểm tra; `-Rehearsal` để tập trên 1 laptop.
+
+### Cách làm tay
+
 ```powershell
 # Máy 1
 powershell -ExecutionPolicy Bypass -File deploy\windows\open-firewall.ps1 -Node 1
